@@ -4,8 +4,8 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use rand::{Rng, distr::Alphanumeric};
-use syn::{Expr, Ident, ItemFn, parse_macro_input};
+use rand::{distr::Alphanumeric, Rng};
+use syn::{parse_macro_input, Expr, Ident, ItemFn};
 
 /// A macro attribute to mark the kernel entry point.
 ///

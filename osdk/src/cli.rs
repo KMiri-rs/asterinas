@@ -8,8 +8,8 @@ use crate::{
     arch::Arch,
     commands::{
         execute_build_command, execute_debug_command, execute_forwarded_command,
-        execute_forwarded_command_on_each_crate, execute_new_command, execute_profile_command,
-        execute_run_command, execute_test_command,
+        execute_forwarded_command_on_each_crate, execute_miri_command, execute_new_command,
+        execute_profile_command, execute_run_command, execute_test_command,
     },
     config::{
         Config,
@@ -67,6 +67,9 @@ pub fn main() {
             execute_forwarded_command_on_each_crate("clippy", &args.args, args.ktests)
         }
         OsdkSubcommand::Doc(args) => execute_forwarded_command("doc", &args.args, false),
+        OsdkSubcommand::Miri(test_args) => {
+            execute_miri_command(&load_config(&test_args.common_args), test_args)
+        }
     }
 }
 
@@ -104,6 +107,8 @@ pub enum OsdkSubcommand {
     Clippy(KtestWithForwardedArguments),
     #[command(about = "Build a package's documentation")]
     Doc(ForwardedArguments),
+    #[command(about = "Use miri to run user mode tests")]
+    Miri(TestArgs),
 }
 
 #[derive(Debug, Parser)]

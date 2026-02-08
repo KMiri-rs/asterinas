@@ -50,6 +50,8 @@ pub enum BaseCrateType {
     Run,
     /// The base crate is for testing the target crate.
     Test,
+    /// The base crate is for running the target crate with miri.
+    Miri,
     /// The base crate is for other actions using Cargo.
     #[expect(unused)]
     Other,
@@ -74,6 +76,7 @@ pub fn new_base_crate(
             + match base_type {
                 BaseCrateType::Run => "-run-base",
                 BaseCrateType::Test => "-test-base",
+                BaseCrateType::Miri => "-miri-base",
                 BaseCrateType::Other => "-base",
             })
         .to_string(),
@@ -175,7 +178,7 @@ fn do_new_base_crate(
     }
     // TODO: currently just x86_64 works; add support for other architectures
     // here when OSTD is ready
-    include_linker_script!(["x86_64.ld", "riscv64.ld", "loongarch64.ld"]);
+    include_linker_script!(["x86_64.ld", "riscv64.ld", "loongarch64.ld", "miri.ld"]);
 
     // Overwrite the main.rs file
     let main_rs = include_str!("main.rs.template");

@@ -6,6 +6,7 @@
 
 #![no_std]
 #![forbid(unsafe_code)]
+#![feature(core_intrinsics)]
 
 extern crate alloc;
 
@@ -31,6 +32,7 @@ pub enum KtestResult {
 }
 
 /// The entry point of the test runner.
+#[cfg(not(miri))]
 #[ostd::ktest::main]
 fn main() {
     use ostd::task::TaskOptions;
@@ -52,6 +54,7 @@ fn main() {
     TaskOptions::new(test_task).data(()).spawn().unwrap();
 }
 
+#[cfg(not(miri))]
 #[ostd::ktest::panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     let _irq_guard = ostd::irq::disable_local();
@@ -74,6 +77,18 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     early_println!("An uncaught panic occurred: {:#?}", throw_info);
 
     ostd::prelude::abort();
+}
+
+/// The entry point of the miri runner.
+#[cfg(miri)]
+#[ostd::ktest::miri_main]
+fn miri_main() {}
+
+#[cfg(miri)]
+#[ostd::ktest::panic_handler]
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    use core::intrinsics::abort;
+    abort();
 }
 
 /// Run all the tests registered by `#[ktest]` in the `.ktest_array` section.

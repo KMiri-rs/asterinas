@@ -55,9 +55,9 @@ pub fn miri_current_crate(config: &Config, args: &TestArgs) {
     let ktest_main_rs = format!(
         r#"
 {}
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static KTEST_TEST_WHITELIST: Option<&[&str]> = {};
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static KTEST_CRATE_WHITELIST: Option<&[&str]> = Some(&{:#?});
 "#,
         if runner_self_test {
@@ -68,7 +68,7 @@ pub static KTEST_CRATE_WHITELIST: Option<&[&str]> = Some(&{:#?});
         ktest_test_whitelist,
         ktest_crate_whitelist,
     );
-    let mut main_rs_content = fs::read_to_string(dbg!(&main_rs_path)).unwrap();
+    let mut main_rs_content = fs::read_to_string(&main_rs_path).unwrap();
     main_rs_content.push_str(&ktest_main_rs);
     fs::write(&main_rs_path, main_rs_content).unwrap();
     // Build the kernel with the given base crate

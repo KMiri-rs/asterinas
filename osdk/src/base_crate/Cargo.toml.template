@@ -6,3 +6,6 @@
 name = "#NAME#"
 version = "#VERSION#"
 edition = "2024"
+
+[patch.crates-io]
+ostd = { git = "https://github.com/KMiri-rs/asterinas.git", branch = "kmiri" }

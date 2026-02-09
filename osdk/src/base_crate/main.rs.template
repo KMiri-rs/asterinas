@@ -7,7 +7,8 @@ extern crate #TARGET_NAME#;
 
 #[cfg(miri)]
 fn main() {
-    ostd::arch::boot::miri_boot();
+    // FIXME: implement miri_boot.
+    // ostd::arch::boot::miri_boot();
 }
 
 #[panic_handler]

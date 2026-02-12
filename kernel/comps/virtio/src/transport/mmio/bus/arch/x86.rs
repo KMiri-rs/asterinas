@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use log::debug;
+#[cfg(not(miri))]
 use ostd::arch::irq::IRQ_CHIP;
+#[cfg(not(miri))]
 pub(super) use ostd::arch::irq::MappedIrqLine;
 
 use crate::transport::mmio::bus::MmioRegisterError;
 
+#[cfg(not(miri))]
 pub(super) fn probe_for_device() {
     // TODO: The correct method for detecting VirtIO-MMIO devices on x86_64 systems is to parse the
     // kernel command line if ACPI tables are absent [1], or the ACPI SSDT if ACPI tables are

@@ -4,12 +4,11 @@
 
 use core::ops::RangeInclusive;
 
+#[cfg(not(miri))]
+use ostd::arch::kernel::ACPI_INFO;
 use ostd::{
     Error,
-    arch::{
-        device::io_port::{ReadWriteAccess, WriteOnlyAccess},
-        kernel::ACPI_INFO,
-    },
+    arch::device::io_port::{ReadWriteAccess, WriteOnlyAccess},
     io::{IoMem, IoPort},
     mm::VmIoOnce,
     sync::SpinLock,
@@ -98,6 +97,7 @@ fn encode_as_port(location: &PciDeviceLocation) -> u32 {
 ///
 /// Returns a range for the PCI bus number, or [`None`] if there is no PCI bus.
 pub(crate) fn init() -> Option<RangeInclusive<u8>> {
+    #[cfg(not(miri))]
     if let Some(ecam) = ACPI_INFO.get().unwrap().pci_ecam_region.as_ref() {
         let bus_start = ecam.bus_start;
         let bus_end = ecam.bus_end;

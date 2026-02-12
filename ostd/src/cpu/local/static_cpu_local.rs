@@ -9,7 +9,7 @@
 
 use core::marker::PhantomData;
 
-use super::{__cpu_local_end, __cpu_local_start, AnyStorage, CpuLocal};
+use super::{AnyStorage, CpuLocal, cpu_local_end, cpu_local_start};
 use crate::{arch, cpu::CpuId, irq::DisabledLocalIrqGuard, util::id_set::Id};
 
 /// Defines a statically-allocated CPU-local variable.
@@ -89,9 +89,9 @@ impl<T: 'static> StaticStorage<T> {
     /// Gets the offset of the CPU-local object in the CPU-local area.
     fn get_offset(&self) -> usize {
         let bsp_va = self as *const _ as usize;
-        let bsp_base = __cpu_local_start as *const () as usize;
+        let bsp_base = cpu_local_start();
         // The implementation should ensure that the CPU-local object resides in the `.cpu_local`.
-        debug_assert!(bsp_va + size_of::<T>() <= __cpu_local_end as *const () as usize);
+        debug_assert!(bsp_va + size_of::<T>() <= cpu_local_end());
 
         bsp_va - bsp_base
     }

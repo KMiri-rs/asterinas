@@ -69,10 +69,22 @@ impl<C: PageTableConfig> PageTableNode<C> {
     /// Allocates a new empty page table node.
     pub(super) fn alloc(level: PagingLevel) -> Self {
         let meta = PageTablePageMeta::new(level);
-        FrameAllocOptions::new()
+        let page = FrameAllocOptions::new()
             .zeroed(true)
             .alloc_frame_with(meta)
-            .expect("Failed to allocate a page table node")
+            .expect("Failed to allocate a page table node");
+
+        unsafe {
+            #[cfg(miri)]
+            crate::arch::kern_miri_retype_pages(
+                page.paddr(),
+                1,
+                crate::arch::PageType::PageTable,
+                8,
+            );
+        }
+
+        page
     }
 
     /// Activates the page table assuming it is a root page table.

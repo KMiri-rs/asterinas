@@ -466,6 +466,36 @@ pub(crate) fn unpark_target(runnable: Arc<Task>) {
     }
 }
 
+pub fn kernel_task_entry(_temp: usize) {
+    // See `switch_to_task` for why we need this.
+    crate::arch::irq::enable_local();
+
+    let current_task =
+        Task::current().expect("no current task, it should have current task in kernel task entry");
+
+    let task_func = unsafe { &mut current_task.func.get() };
+    let task_func = task_func
+        .take()
+        .expect("task function is `None` when trying to run");
+    task_func();
+
+    exit_current();
+}
+
+unsafe extern "Rust" {
+    pub fn miri_create_new_thread(
+        func: fn(usize),
+        arg: usize,
+        task: &Task,
+        stack_end: usize,
+        stack_size: usize,
+    );
+
+    pub fn miri_switch_to(task: &Task);
+
+    pub fn miri_load_cpu_local(addr: *const u8) -> *const u8;
+}
+
 /// Enqueues a newly built task.
 ///
 /// Note that the new task is not guaranteed to run at once.
@@ -475,6 +505,16 @@ pub(super) fn run_new_task(runnable: Arc<Task>) {
     // Currently OSTD cannot know whether its user has injected a scheduler.
     if !SCHEDULER.is_completed() {
         fifo_scheduler::init();
+    }
+
+    unsafe {
+        miri_create_new_thread(
+            kernel_task_entry,
+            0,
+            runnable.as_ref(),
+            runnable.kstack.end_vaddr(),
+            super::kernel_stack::KERNEL_STACK_SIZE,
+        );
     }
 
     let preempt_cpu = SCHEDULER

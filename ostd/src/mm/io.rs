@@ -253,8 +253,14 @@ unsafe fn memcpy(dst: *mut u8, src: *const u8, len: usize) {
     // For more details and future possibilities, see
     // <https://github.com/asterinas/asterinas/pull/1001#discussion_r1667317406>.
 
-    // SAFETY: The safety is guaranteed by the safety preconditions and the explanation above.
-    unsafe { core::intrinsics::volatile_copy_memory(dst, src, len) };
+    unsafe {
+        // SAFETY: The safety is guaranteed by the safety preconditions and the explanation above.
+        #[cfg(not(miri))]
+        core::intrinsics::volatile_copy_memory(dst, src, len);
+        // SAFETY: A magic kmiri intrinsic copy.
+        #[cfg(miri)]
+        crate::arch::kern_miri_copy(dst as usize, src as usize, len);
+    }
 }
 
 /// Fills `len` bytes of memory at `dst` with the specified `value`.

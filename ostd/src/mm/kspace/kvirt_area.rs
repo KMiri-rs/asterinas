@@ -108,6 +108,8 @@ impl KVirtArea {
         let range = KVIRT_AREA_ALLOCATOR.alloc(area_size).unwrap();
         let cursor_range = range.start + map_offset..range.end;
 
+        crate::miri_println!("map: 0x{:x}-0x{:x}", range.start, range.end);
+
         let page_table = KERNEL_PAGE_TABLE.get().unwrap();
         let preempt_guard = disable_preempt();
         let mut cursor = page_table

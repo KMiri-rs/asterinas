@@ -66,10 +66,26 @@ pub type DynamicCpuLocal<T> = CpuLocal<T, DynamicStorage<T>>;
 /// Statically-allocated CPU-local objects.
 pub type StaticCpuLocal<T> = CpuLocal<T, StaticStorage<T>>;
 
-// These symbols are provided by the linker script.
-unsafe extern "C" {
-    fn __cpu_local_start();
-    fn __cpu_local_end();
+mod addr {
+    // These symbols are provided by the linker script.
+    unsafe extern "C" {
+        pub fn __cpu_local_start();
+        pub fn __cpu_local_end();
+    }
+}
+
+fn cpu_local_start() -> usize {
+    #[cfg(miri)]
+    return 0xffff_ffff_8000_0000usize + 4080 * PAGE_SIZE;
+    #[cfg(not(miri))]
+    return addr::__cpu_local_start as usize;
+}
+
+fn cpu_local_end() -> usize {
+    #[cfg(miri)]
+    return 0xffff_ffff_8000_0000 + 4096 * PAGE_SIZE;
+    #[cfg(not(miri))]
+    return addr::__cpu_local_end as usize;
 }
 
 /// A trait to abstract any type that can be used as a slot for a CPU-local
@@ -223,8 +239,8 @@ pub(crate) unsafe fn copy_bsp_for_ap(num_cpus: usize) {
         unsafe { core::slice::from_raw_parts_mut(ptr, num_aps) }
     };
 
-    let bsp_base_va = __cpu_local_start as *const () as usize;
-    let bsp_end_va = __cpu_local_end as *const () as usize;
+    let bsp_base_va = cpu_local_start();
+    let bsp_end_va = cpu_local_end();
 
     // Allocate the CPU-local storage segments for APs.
     for res_addr_mut in res.iter_mut() {

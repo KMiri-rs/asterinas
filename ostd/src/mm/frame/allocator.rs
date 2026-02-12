@@ -61,7 +61,12 @@ impl FrameAllocOptions {
         if self.zeroed {
             let addr = paddr_to_vaddr(frame.paddr()) as *mut u8;
             // SAFETY: The newly allocated frame is guaranteed to be valid.
-            unsafe { core::ptr::write_bytes(addr, 0, PAGE_SIZE) }
+            unsafe {
+                #[cfg(not(miri))]
+                core::ptr::write_bytes(addr, 0, PAGE_SIZE);
+                #[cfg(miri)]
+                crate::arch::kern_miri_zero(frame.paddr(), 1);
+            }
         }
 
         Ok(frame)
@@ -98,7 +103,12 @@ impl FrameAllocOptions {
         if self.zeroed {
             let addr = paddr_to_vaddr(segment.paddr()) as *mut u8;
             // SAFETY: The newly allocated segment is guaranteed to be valid.
-            unsafe { core::ptr::write_bytes(addr, 0, nframes * PAGE_SIZE) }
+            unsafe {
+                #[cfg(not(miri))]
+                core::ptr::write_bytes(addr, 0, nframes * PAGE_SIZE);
+                #[cfg(miri)]
+                crate::arch::kern_miri_zero(segment.paddr(), nframes);
+            }
         }
 
         Ok(segment)
@@ -307,6 +317,17 @@ impl EarlyFrameAllocator {
                 && allocated_end <= end
             {
                 *tail = allocated_end;
+
+                unsafe {
+                    // SAFETY: allocate a page in miri with right start and size.
+                    #[cfg(miri)]
+                    crate::arch::kern_miri_alloc_pages(allocated * PAGE_SIZE, size)
+                    // FIXME: where is deallocated function?
+                    // CountingFrameAllocator was removed since https://github.com/asterinas/asterinas/commit/5f05963e
+                    // while atc'25 have a pairing kern_miri_dealloc_pages
+                    // https://github.com/KMiri-rs/asterinas-atc25-artifact-evaluation/blob/59dca48f8b2d9d3e5edd8ef89443417b57749682/ostd/src/mm/frame/allocator.rs#L180
+                };
+
                 return Some(allocated);
             }
         }

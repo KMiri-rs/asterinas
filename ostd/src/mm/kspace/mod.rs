@@ -57,7 +57,7 @@ use super::{
 use crate::{
     arch::mm::{PageTableEntry, PagingConsts},
     boot::memory_region::MemoryRegionType,
-    const_assert,
+    const_assert, miri_println,
     mm::{PAGE_SIZE, PagingLevel, page_table::largest_pages},
     task::disable_preempt,
 };
@@ -195,6 +195,7 @@ pub(super) enum MappedItem {
 /// This function should be called before:
 ///  - any initializer that modifies the kernel page table.
 pub fn init_kernel_page_table(meta_pages: Segment<MetaPageMeta>) {
+    miri_println!("initializing the kernel page table");
     info!("Initializing the kernel page table");
 
     // Start to initialize the kernel page table.
@@ -218,6 +219,12 @@ pub fn init_kernel_page_table(meta_pages: Segment<MetaPageMeta>) {
             unsafe { cursor.map(MappedItem::Untracked(pa, level, prop)) }
                 .expect("Kernel linear address space is mapped twice");
         }
+
+        miri_println!(
+            "finish linear mapping, mapping physical range: 0x{:x} - 0x{:x}",
+            from.start,
+            from.end
+        );
     }
 
     // Map the metadata pages.
@@ -241,6 +248,8 @@ pub fn init_kernel_page_table(meta_pages: Segment<MetaPageMeta>) {
             unsafe { cursor.map(MappedItem::Untracked(pa, level, prop)) }
                 .expect("Frame metadata address space is mapped twice");
         }
+
+        miri_println!("finish metadata mapping");
     }
 
     // In LoongArch64, we don't need to do linear mappings for the kernel code because of DMW0.
@@ -266,9 +275,16 @@ pub fn init_kernel_page_table(meta_pages: Segment<MetaPageMeta>) {
             unsafe { cursor.map(MappedItem::Untracked(pa, level, prop)) }
                 .expect("Kernel code mapped twice");
         }
+
+        miri_println!(
+            "finish kernel code mapping, kernel code virtual address range: 0x{:x} - 0x{:x}",
+            from.start,
+            from.end
+        );
     }
 
     KERNEL_PAGE_TABLE.call_once(|| kpt);
+    miri_println!("finish kernel page table initialization");
 }
 
 /// Activates the kernel page table.

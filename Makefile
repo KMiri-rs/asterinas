@@ -420,6 +420,10 @@ format:
 	@$(MAKE) --no-print-directory -C test/initramfs format
 	@$(MAKE) --no-print-directory -C test/nixos format
 
+.PHONY: check-ostd
+check-ostd:
+	cd ostd && RUSTFLAGS=--cfg=miri cargo b
+
 .PHONY: check
 check: private WORKSPACE_MEMBER_DIRS = \
     $(shell ./tools/print_workspace_members.sh)

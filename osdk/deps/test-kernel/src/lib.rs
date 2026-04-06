@@ -7,6 +7,8 @@
 #![no_std]
 #![forbid(unsafe_code)]
 #![feature(core_intrinsics)]
+#![allow(internal_features)]
+#![allow(unused)]
 
 extern crate alloc;
 

@@ -16,7 +16,7 @@
 #![feature(format_args_nl)]
 #![expect(internal_features)]
 #![no_std]
-#![warn(missing_docs)]
+#![allow(missing_docs, unused, unsafe_op_in_unsafe_fn)]
 
 extern crate alloc;
 

@@ -1,14 +1,16 @@
 #![no_std]
-#![cfg_attr(not(miri), no_main)]
+#![no_main]
 
 #![feature(linkage)]
 
 extern crate #TARGET_NAME#;
 
 #[cfg(miri)]
-fn main() {
+#[unsafe(no_mangle)]
+fn miri_start(argc: isize, argv: *const *const u8) -> isize {
     // FIXME: implement miri_boot.
     // ostd::arch::boot::miri_boot();
+    0
 }
 
 #[panic_handler]

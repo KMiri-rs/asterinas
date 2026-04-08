@@ -273,10 +273,7 @@ fn build_kernel_elf(
     if no_default_features {
         command.arg("--no-default-features");
     }
-    // Don't forward `--target` because miri only works on host target.
-    if !is_miri {
-        command.arg("--target").arg(&target_os_string);
-    }
+    command.arg("--target").arg(&target_os_string);
     command
         .arg("--target-dir")
         .arg(cargo_target_directory.as_ref());

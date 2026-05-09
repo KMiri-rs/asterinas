@@ -3,6 +3,9 @@
 
 #![feature(linkage)]
 
+// `miri_println` requires this feature.
+#![cfg_attr(miri, feature(format_args_nl))]
+
 extern crate #TARGET_NAME#;
 
 #[cfg(miri)]
@@ -10,6 +13,11 @@ extern crate #TARGET_NAME#;
 fn miri_start(argc: isize, argv: *const *const u8) -> isize {
     // FIXME: implement miri_boot.
     // ostd::arch::boot::miri_boot();
+
+    // Safety: trust miri interpreter to correctly set up entry fn arguments.
+    let args = unsafe { core::slice::from_raw_parts(argv, argc as usize) };
+    ostd::miri_println!("argc={argc} argv={argv:p}\nargs={args:?}");
+
     0
 }
 

@@ -81,6 +81,6 @@ pub static KTEST_CRATE_WHITELIST: Option<&[&str]> = Some(&{:#?});
         &cargo_target_directory,
         config,
         ActionChoice::Miri,
-        &["--cfg ktest"],
+        &["--cfg=ktest", "--cfg=miri"],
     );
 }

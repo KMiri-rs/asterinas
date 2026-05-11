@@ -160,12 +160,12 @@ impl Bundle {
         let self_action = match self.manifest.action {
             ActionChoice::Run => &self.manifest.config.run,
             ActionChoice::Test => &self.manifest.config.test,
-            ActionChoice::Miri => todo!(),
+            ActionChoice::Miri => return Ok(()),
         };
         let config_action = match action {
             ActionChoice::Run => &config.run,
             ActionChoice::Test => &config.test,
-            ActionChoice::Miri => todo!(),
+            ActionChoice::Miri => unreachable!(),
         };
 
         // Compare the manifest with the run configuration except the initramfs and the boot method.

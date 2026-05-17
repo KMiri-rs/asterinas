@@ -9,9 +9,8 @@ use spin::Once;
 use crate::{
     arch::irq::HwCpuId,
     mm::{
-        FrameAllocOptions, HasPaddrRange, PAGE_SIZE,
-        frame::{Segment, meta::KernelMeta},
-        paddr_to_vaddr,
+        frame::{meta::KernelMeta, Segment},
+        paddr_to_vaddr, FrameAllocOptions, HasPaddrRange, PAGE_SIZE,
     },
     sync::SpinLock,
     task::Task,
@@ -106,11 +105,30 @@ pub(crate) unsafe fn boot_all_aps() {
 
     let info_ptr = AP_BOOT_INFO.get().unwrap().per_ap_raw_info.as_ptr();
     let pt_ptr = crate::mm::page_table::boot_pt::with_borrow(|pt| pt.root_address()).unwrap();
-    // SAFETY: It's the right time to boot APs (guaranteed by the caller) and
-    // the arguments are valid to boot APs (generated above).
-    unsafe { crate::arch::boot::smp::bringup_all_aps(info_ptr, pt_ptr, num_cpus as u32) };
+
+    unsafe { crate::arch::boot::smp::bringup_all_aps(info_ptr, pt_ptr, num_cpus as _) };
 
     wait_for_all_aps_started(num_cpus);
+
+    // FIXME: not esure if this is needed.
+    // cc https://github.com/KMiri-rs/KMiri/issues/5
+    // #[cfg(miri)]
+    // {
+    //     let ap_boot_info = AP_BOOT_INFO.get().unwrap();
+    //     let boot_stack = &ap_boot_info.boot_stack_array;
+    //
+    //     let ap_init_task = |_| ();
+    //     unsafe {
+    //         crate::arch::kern_miri_init_ap(
+    //             1,
+    //             ap_init_task,
+    //             0,
+    //             &*(0x1000 as *const Task),
+    //             boot_stack.end_paddr() + crate::mm::kspace::KERNEL_BASE_VADDR,
+    //             boot_stack.size(),
+    //         );
+    //     }
+    // }
 
     crate::info!("All application processors started. The BSP continues to run.");
 }

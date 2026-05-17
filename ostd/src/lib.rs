@@ -26,9 +26,41 @@ macro_rules! __log_prefix {
     };
 }
 
-#[cfg_attr(target_arch = "x86_64", path = "arch/x86/mod.rs")]
-#[cfg_attr(target_arch = "riscv64", path = "arch/riscv/mod.rs")]
-#[cfg_attr(target_arch = "loongarch64", path = "arch/loongarch/mod.rs")]
+/// `println!` in kmiri. This macro expands nothing if `--cfg=miri` is not enabled.
+#[macro_export]
+macro_rules! miri_println {
+    () => {
+        #[cfg(miri)]
+        $crate::miri_print!("\n");
+    };
+    ($($arg:tt)*) => {
+        #[cfg(miri)]
+        $crate::arch::_miri_print(format_args_nl!($($arg)*));
+    };
+}
+
+/// Record time in kmiri.
+#[macro_export]
+macro_rules! miri_record {
+    ($index:expr) => {
+        #[cfg(miri)]
+        $crate::arch::kern_miri_record_time($index);
+    };
+    ($index1:expr, $index2:expr) => {
+        #[cfg(miri)]
+        $crate::arch::kern_miri_record_time($index1);
+        #[cfg(miri)]
+        $crate::arch::kern_miri_record_time($index2);
+    };
+}
+
+#[cfg_attr(miri, path = "arch/miri/mod.rs")]
+#[cfg_attr(all(target_arch = "x86_64", not(miri)), path = "arch/x86/mod.rs")]
+#[cfg_attr(all(target_arch = "riscv64", not(miri)), path = "arch/riscv/mod.rs")]
+#[cfg_attr(
+    all(target_arch = "loongarch64", not(miri)),
+    path = "arch/loongarch/mod.rs"
+)]
 pub mod arch;
 
 pub mod boot;
@@ -82,7 +114,7 @@ unsafe fn init() {
     // and after memory regions are initialized.
     unsafe { mm::frame::allocator::init_early_allocator() };
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     arch::if_tdx_enabled!({
     } else {
         arch::serial::init();
@@ -117,7 +149,7 @@ unsafe fn init() {
     // SAFETY: This function is called only once on the BSP.
     unsafe { arch::late_init_on_bsp() };
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     arch::if_tdx_enabled!({
         arch::serial::init();
     });

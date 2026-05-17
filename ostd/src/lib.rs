@@ -13,7 +13,7 @@
 #![cfg_attr(target_arch = "x86_64", feature(iter_advance_by, macro_metavar_expr))]
 #![expect(internal_features)]
 #![no_std]
-#![warn(missing_docs)]
+#![allow(missing_docs, unused, unsafe_op_in_unsafe_fn)]
 
 extern crate alloc;
 #[macro_use]

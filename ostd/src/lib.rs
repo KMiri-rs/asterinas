@@ -196,6 +196,6 @@ pub mod ktest {
     //! It is rather discouraged to use the definitions here directly. The
     //! `ktest` attribute is sufficient for all normal use cases.
 
-    pub use ostd_macros::{test_main as main, test_panic_handler as panic_handler};
+    pub use ostd_macros::{miri_main, test_main as main, test_panic_handler as panic_handler};
     pub use ostd_test::*;
 }

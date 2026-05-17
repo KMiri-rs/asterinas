@@ -23,6 +23,10 @@ pub(super) mod common_device;
 /// The MMIO bus instance.
 pub(super) static MMIO_BUS: SpinLock<MmioBus> = SpinLock::new(MmioBus::new());
 
+#[cfg(miri)]
+pub(super) fn init() {}
+
+#[cfg(not(miri))]
 pub(super) fn init() {
     #[cfg(target_arch = "x86_64")]
     ostd::if_tdx_enabled!({

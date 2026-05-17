@@ -7,18 +7,17 @@ use x86_64::{VirtAddr, instructions::tlb, structures::paging::PhysFrame};
 
 #[path = "../../x86/mm/pat.rs"]
 mod pat;
+use ostd_pod::Pod;
+
 use self::pat::{cache_policy_to_flags, flags_to_cache_policy};
 use super::kern_miri_copy;
-use crate::{
-    Pod,
-    mm::{
-        PAGE_SIZE, Paddr, PagingConstsTrait, PagingLevel, PodOnce, Vaddr,
-        dma::DmaDirection,
-        page_prop::{
-            CachePolicy, PageFlags, PageProperty, PageTableFlags, PrivilegedPageFlags as PrivFlags,
-        },
-        page_table::{PteScalar, PteTrait},
+use crate::mm::{
+    PAGE_SIZE, Paddr, PagingConstsTrait, PagingLevel, PodOnce, Vaddr,
+    dma::DmaDirection,
+    page_prop::{
+        CachePolicy, PageFlags, PageProperty, PageTableFlags, PrivilegedPageFlags as PrivFlags,
     },
+    page_table::{PteScalar, PteTrait},
 };
 
 #[derive(Clone, Debug, Default)]

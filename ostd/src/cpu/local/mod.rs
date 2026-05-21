@@ -76,14 +76,14 @@ mod addr {
 
 fn cpu_local_start() -> usize {
     #[cfg(miri)]
-    return 0xffff_ffff_8000_0000usize + 4080 * PAGE_SIZE;
+    return 0x40_0000;
     #[cfg(not(miri))]
     return addr::__cpu_local_start as *const () as usize;
 }
 
 fn cpu_local_end() -> usize {
     #[cfg(miri)]
-    return 0xffff_ffff_8000_0000 + 4096 * PAGE_SIZE;
+    return 0x41_0000;
     #[cfg(not(miri))]
     return addr::__cpu_local_end as *const () as usize;
 }

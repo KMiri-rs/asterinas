@@ -321,7 +321,7 @@ impl EarlyFrameAllocator {
                 // SAFETY: allocate a page in miri with right start and size.
                 #[cfg(miri)]
                 unsafe {
-                    crate::arch::kern_miri_alloc_pages(allocated * PAGE_SIZE, size)
+                    crate::arch::kern_miri_alloc_pages(allocated, size / PAGE_SIZE)
                     // FIXME: where is deallocated function?
                     // CountingFrameAllocator was removed since https://github.com/asterinas/asterinas/commit/5f05963e
                     // while atc'25 have a pairing kern_miri_dealloc_pages

@@ -525,8 +525,9 @@ pub(in crate::mm) fn is_initialized() -> bool {
 }
 
 fn alloc_meta_frames(tot_nr_frames: usize) -> (usize, Paddr) {
+    let slot_size = size_of::<MetaSlot>();
     let nr_meta_pages = tot_nr_frames
-        .checked_mul(size_of::<MetaSlot>())
+        .checked_mul(slot_size)
         .unwrap()
         .div_ceil(PAGE_SIZE);
     let paddr = allocator::early_alloc(
@@ -534,34 +535,59 @@ fn alloc_meta_frames(tot_nr_frames: usize) -> (usize, Paddr) {
     )
     .unwrap();
 
-    // SAFETY: Mark meta pages as Slab in miri.
+    let slots = paddr_to_vaddr(paddr);
+
+    // Build the byte representation once and copy it into each slot. Using raw
+    // untyped copies keeps this initialization independent of pointer
+    // provenance, which matters because the backing pages are still only known
+    // to Miri as freshly allocated physical memory here.
+    let mut meta_slot_bytes = [0u8; META_SLOT_SIZE];
+    meta_slot_bytes[FRAME_METADATA_MAX_SIZE..FRAME_METADATA_MAX_SIZE + size_of::<AtomicU64>()]
+        .copy_from_slice(&REF_COUNT_UNUSED.to_ne_bytes());
+    // `MaybeUninit` permits any bit pattern, so zeroing the vtable slot is fine
+    // here even though the value is not yet initialized.
+    meta_slot_bytes[FRAME_METADATA_MAX_SIZE + size_of::<AtomicU64>()
+        ..FRAME_METADATA_MAX_SIZE + size_of::<AtomicU64>() + size_of::<FrameMetaVtablePtr>()]
+        .fill(0);
+    meta_slot_bytes[FRAME_METADATA_MAX_SIZE + size_of::<AtomicU64>() + size_of::<FrameMetaVtablePtr>()
+        ..META_SLOT_SIZE]
+        .copy_from_slice(&0u64.to_ne_bytes());
+
+    for i in 0..tot_nr_frames {
+        let slot_paddr = paddr + i * slot_size;
+        // SAFETY: We write exactly one slot worth of bytes into a freshly
+        // allocated page range. Miri treats this as untyped raw memory access,
+        // so no provenance is required here.
+        #[cfg(miri)]
+        unsafe {
+            crate::arch::kern_miri_copy_untyped(
+                paddr_to_vaddr(slot_paddr) as *const u8,
+                meta_slot_bytes.as_ptr(),
+                META_SLOT_SIZE,
+            );
+        }
+
+        #[cfg(not(miri))]
+        unsafe {
+            let slot = (slots + i * slot_size) as *mut MetaSlot;
+            slot.write(MetaSlot {
+                storage: UnsafeCell::new([0; FRAME_METADATA_MAX_SIZE]),
+                ref_count: AtomicU64::new(REF_COUNT_UNUSED),
+                vtable_ptr: UnsafeCell::new(MaybeUninit::uninit()),
+                in_list: AtomicU64::new(0),
+            });
+        }
+    }
+
+    // SAFETY: Mark meta pages as Slab in miri after the initialization pass.
     #[cfg(miri)]
     unsafe {
         crate::arch::kern_miri_retype_pages(
             paddr,
             nr_meta_pages,
             crate::arch::PageType::Slab,
-            size_of::<MetaSlot>(),
+            slot_size,
         );
-    }
-
-    let slots = paddr_to_vaddr(paddr) as *mut MetaSlot;
-
-    // Initialize the metadata slots.
-    for i in 0..tot_nr_frames {
-        // SAFETY: The memory is successfully allocated with `tot_nr_frames`
-        // slots so the index must be within the range.
-        let slot = unsafe { slots.add(i) };
-        // SAFETY: The memory is just allocated so we have exclusive access and
-        // it's valid for writing.
-        unsafe {
-            slot.write(MetaSlot {
-                storage: UnsafeCell::new([0; FRAME_METADATA_MAX_SIZE]),
-                ref_count: AtomicU64::new(REF_COUNT_UNUSED),
-                vtable_ptr: UnsafeCell::new(MaybeUninit::uninit()),
-                in_list: AtomicU64::new(0),
-            })
-        };
     }
 
     (nr_meta_pages, paddr)

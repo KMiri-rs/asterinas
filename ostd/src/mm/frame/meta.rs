@@ -545,13 +545,13 @@ fn alloc_meta_frames(tot_nr_frames: usize) -> (usize, Paddr) {
         );
     }
 
-    let slots = paddr_to_vaddr(paddr) as *mut MetaSlot;
+    let slots = paddr_to_vaddr(paddr);
 
     // Initialize the metadata slots.
     for i in 0..tot_nr_frames {
+        let slot = (slots + i * size_of::<MetaSlot>()) as *mut MetaSlot;
         // SAFETY: The memory is successfully allocated with `tot_nr_frames`
         // slots so the index must be within the range.
-        let slot = unsafe { slots.add(i) };
         // SAFETY: The memory is just allocated so we have exclusive access and
         // it's valid for writing.
         unsafe {

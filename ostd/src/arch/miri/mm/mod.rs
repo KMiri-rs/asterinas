@@ -79,35 +79,22 @@ bitflags::bitflags! {
 /// This flush performs regardless of the global-page bit. So it can flush both global
 /// and non-global entries.
 pub(crate) fn tlb_flush_addr(vaddr: Vaddr) {
-    tlb::flush(VirtAddr::new(vaddr as u64));
+    // NOP.
 }
 
 /// Flush any TLB entry that intersects with the given address range.
 pub(crate) fn tlb_flush_addr_range(range: &Range<Vaddr>) {
-    for vaddr in range.clone().step_by(PAGE_SIZE) {
-        tlb_flush_addr(vaddr);
-    }
+    // NOP.
 }
 
 /// Flush all TLB entries except for the global-page entries.
 pub(crate) fn tlb_flush_all_excluding_global() {
-    tlb::flush_all();
+    // NOP.
 }
 
 /// Flush all TLB entries, including global-page entries.
 pub(crate) fn tlb_flush_all_including_global() {
-    // SAFETY: updates to CR4 here only change the global-page bit, the side effect
-    // is only to invalidate the TLB, which doesn't affect the memory safety.
-    unsafe {
-        // To invalidate all entries, including global-page
-        // entries, disable global-page extensions (CR4.PGE=0).
-        x86_64::registers::control::Cr4::update(|cr4| {
-            *cr4 -= x86_64::registers::control::Cr4Flags::PAGE_GLOBAL;
-        });
-        x86_64::registers::control::Cr4::update(|cr4| {
-            *cr4 |= x86_64::registers::control::Cr4Flags::PAGE_GLOBAL;
-        });
-    }
+    // NOP.
 }
 
 pub(crate) fn can_sync_dma() -> bool {
@@ -126,6 +113,18 @@ pub(crate) unsafe fn sync_dma_range<D: DmaDirection>(_range: Range<Vaddr>) {
     // Reference: <https://lwn.net/Articles/855328/>, <https://lwn.net/Articles/2265/>.
 }
 
+unsafe extern "Rust" {
+    /// Activates the page table with the root physical address `root_paddr`
+    /// as the currently used page table. When `miri` performs this operation,
+    /// it will recursively traverse the page table nodes starting from `root_paddr`.
+    /// If any intermediate node points to a page that does not have
+    /// the expected page state for a page table node, it will be treated as UB.
+    fn kern_miri_set_root_page_table(root_paddr: Paddr);
+
+    /// Obtains the root_paddr of the currently active page table.
+    fn kern_miri_get_root_page_table() -> Paddr;
+}
+
 /// Activates the given root-level page table.
 ///
 /// The cache policy of the root page table node is controlled by `root_pt_cache`.
@@ -134,30 +133,12 @@ pub(crate) unsafe fn sync_dma_range<D: DmaDirection>(_range: Range<Vaddr>) {
 ///
 /// Changing the root-level page table is unsafe, because it's possible to violate memory safety by
 /// changing the page mapping.
-pub(crate) unsafe fn activate_page_table(root_paddr: Paddr, root_pt_cache: CachePolicy) {
-    let addr = PhysFrame::from_start_address(x86_64::PhysAddr::new(root_paddr as u64)).unwrap();
-    let flags = match root_pt_cache {
-        CachePolicy::Writeback => x86_64::registers::control::Cr3Flags::empty(),
-        CachePolicy::Writethrough => x86_64::registers::control::Cr3Flags::PAGE_LEVEL_WRITETHROUGH,
-        CachePolicy::Uncacheable => x86_64::registers::control::Cr3Flags::PAGE_LEVEL_CACHE_DISABLE,
-        // Write-combining and write-protected are not supported for root page table (CR3)
-        // as CR3 only supports WB, WT, and UC via PCD/PWT bits
-        _ => {
-            panic!(
-                "unsupported cache policy for the root page table (only WB, WT, and UC are allowed)"
-            )
-        }
-    };
-
-    // SAFETY: The safety is upheld by the caller.
-    unsafe { x86_64::registers::control::Cr3::write(addr, flags) };
+pub(crate) unsafe fn activate_page_table(root_paddr: Paddr, _root_pt_cache: CachePolicy) {
+    kern_miri_set_root_page_table(root_paddr);
 }
 
 pub(crate) fn current_page_table_paddr() -> Paddr {
-    x86_64::registers::control::Cr3::read_raw()
-        .0
-        .start_address()
-        .as_u64() as Paddr
+    unsafe { kern_miri_get_root_page_table() }
 }
 
 #[derive(Debug, Clone, Copy, Pod)]

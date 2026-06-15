@@ -168,7 +168,7 @@ impl<E: PteTrait, C: PagingConstsTrait> BootPageTable<E, C> {
         while level > 1 {
             let index = pte_index::<C>(from, level);
             // SAFETY: The result pointer is within the PT frame.
-            let pte_ptr = unsafe { (paddr_to_vaddr(pt) as *mut E).add(index) };
+            let pte_ptr = (paddr_to_vaddr(pt) + index * size_of::<E>()) as *mut E;
             // SAFETY: The pointer to the entry is valid to read.
             let pte = unsafe { pte_ptr.read() };
             match pte.to_repr(level) {
@@ -317,10 +317,11 @@ fn dfs_walk_on_leave<E: PteTrait, C: PagingConstsTrait>(
     op: &mut impl FnMut(&mut E, Paddr, PagingLevel, PageTableFlags),
 ) {
     if level >= 2 {
-        let pt_vaddr = paddr_to_vaddr(pt) as *mut E;
+        let pt_vaddr = paddr_to_vaddr(pt);
+        let size = size_of::<E>();
         for offset in 0..nr_subpage_per_huge::<C>() {
             // SAFETY: The result pointer is within the PT frame.
-            let pte_ptr = unsafe { pt_vaddr.add(offset) };
+            let pte_ptr = (pt_vaddr + offset * size) as *mut E;
             // SAFETY: The pointer to the entry is valid to read.
             let mut pte = unsafe { pte_ptr.read() };
 

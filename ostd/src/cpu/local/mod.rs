@@ -76,14 +76,14 @@ mod addr {
 
 fn cpu_local_start() -> usize {
     #[cfg(miri)]
-    return 0x40_0000;
+    return unsafe { crate::arch::kern_miri_get_cpu_local_base() };
     #[cfg(not(miri))]
     return addr::__cpu_local_start as *const () as usize;
 }
 
 fn cpu_local_end() -> usize {
-    #[cfg(miri)]
-    return 0x41_0000;
+    #[cfg(miri)] // cpu_local_size=0x1_0000 in kmiri
+    return unsafe { crate::arch::kern_miri_get_cpu_local_base() + 0x1_0000 };
     #[cfg(not(miri))]
     return addr::__cpu_local_end as *const () as usize;
 }

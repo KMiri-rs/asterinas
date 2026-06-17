@@ -190,7 +190,7 @@ impl<E: PteTrait, C: PagingConstsTrait> BootPageTable<E, C> {
         // Map the page in the last level page table.
         let index = pte_index::<C>(from, 1);
         // SAFETY: The result pointer is within the PT frame.
-        let pte_ptr = unsafe { (paddr_to_vaddr(pt) as *mut E).add(index) };
+        let pte_ptr = unsafe { (paddr_to_vaddr(pt) + index * size_of::<E>()) as *mut E };
         // SAFETY: The pointer to the entry is valid to read.
         let pte = unsafe { pte_ptr.read() };
         if matches!(pte.to_repr(1), PteScalar::Mapped(_, _)) {

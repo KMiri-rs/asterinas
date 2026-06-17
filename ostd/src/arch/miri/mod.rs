@@ -65,7 +65,8 @@ unsafe extern "Rust" {
     /// otherwise, such behavior will be considered UB.
     pub fn kern_miri_dealloc_pages(paddr: usize, count: usize);
 
-    /// Informs KernMiri to retype `count` pages at `paddr` to `page_type`.
+    /// Informs KernMiri to retype `page_count` pages at `paddr` to `page_type`.
+    /// Each slot in the page has both size and alignment being `slot_size`.
     ///
     /// After retyping, the page will become a typed page,
     /// and the memory on the page will be converted into
@@ -75,12 +76,13 @@ unsafe extern "Rust" {
     /// it will be considered UB.
     pub fn kern_miri_retype_pages(
         paddr: usize,
-        count: usize,
+        page_count: usize,
         page_type: PageType,
-        type_size: usize,
+        slot_size: usize,
     );
 
-    pub fn kern_miri_zero(paddr: usize, count: usize);
+    /// Zero `page_count` of pages out. The first page starts at `paddr`.
+    pub fn kern_miri_zero(paddr: usize, page_count: usize);
 
     // u8, u16, u32, u64 untyped read/write operation and untyped copy operation. If the operated `ptr` points to a unused or typed memory, this operation will be treated as UB.
 

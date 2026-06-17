@@ -287,7 +287,18 @@ impl<E: PteTrait, C: PagingConstsTrait> BootPageTable<E, C> {
         // Zero it out.
         let vaddr = paddr_to_vaddr(frame_paddr) as *mut u8;
         // SAFETY: The allocated frame is valid to write.
-        unsafe { core::ptr::write_bytes(vaddr, 0, PAGE_SIZE) };
+        #[cfg(not(miri))]
+        unsafe {
+            core::ptr::write_bytes(vaddr, 0, PAGE_SIZE)
+        };
+
+        // SAFETY: kmiri allocates and retypes the page.
+        #[cfg(miri)]
+        unsafe {
+            use crate::arch::{PageType, kern_miri_retype_pages, kern_miri_zero};
+            kern_miri_zero(frame_paddr, 1);
+            kern_miri_retype_pages(frame_paddr, 1, PageType::PageTable, C::PTE_SIZE);
+        }
 
         (
             E::from_repr(

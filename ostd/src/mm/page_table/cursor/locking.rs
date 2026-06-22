@@ -93,7 +93,7 @@ fn try_traverse_and_lock_subtree_root<'rcu, C: PageTableConfig>(
     va: &Range<Vaddr>,
 ) -> Option<PageTableGuard<'rcu, C>> {
     let mut cur_node_guard: Option<PageTableGuard<C>> = None;
-    let mut cur_pt_addr = pt.root.paddr();
+    let mut cur_pt_paddr = pt.root.paddr();
     for cur_level in (1..=C::NR_LEVELS).rev() {
         let start_idx = pte_index::<C>(va.start, cur_level);
         let level_too_high = {
@@ -104,21 +104,22 @@ fn try_traverse_and_lock_subtree_root<'rcu, C: PageTableConfig>(
             break;
         }
 
-        let cur_pt_ptr = paddr_to_vaddr(cur_pt_addr) as *mut C::E;
+        let cur_pt_ptr =
+            (paddr_to_vaddr(cur_pt_paddr) + start_idx * size_of::<C::E>()) as *mut C::E;
         // SAFETY:
         //  - The page table node is alive because (1) the root node is alive and
         //    (2) all child nodes cannot be recycled because we're in the RCU critical section.
         //  - The index is inside the bound, so the page table entry is valid.
         //  - All page table entries are aligned and accessed with atomic operations only.
-        let cur_pte = unsafe { load_pte(cur_pt_ptr.add(start_idx), Ordering::Acquire) };
+        let cur_pte = unsafe { load_pte(cur_pt_ptr, Ordering::Acquire) };
 
         match cur_pte.to_repr(cur_level) {
             PteScalar::Mapped(_, _) => {
                 break;
             }
             PteScalar::Absent => {}
-            PteScalar::PageTable(child_pt_addr, _) => {
-                cur_pt_addr = child_pt_addr;
+            PteScalar::PageTable(child_pt_paddr, _) => {
+                cur_pt_paddr = child_pt_paddr;
                 cur_node_guard = None;
                 continue;
             }
@@ -128,7 +129,7 @@ fn try_traverse_and_lock_subtree_root<'rcu, C: PageTableConfig>(
         let mut pt_guard = cur_node_guard.take().unwrap_or_else(|| {
             // SAFETY: The node must be alive for at least `'rcu` since the
             // address is read from the page table node.
-            let node_ref = unsafe { PageTableNodeRef::<'rcu, C>::borrow_paddr(cur_pt_addr) };
+            let node_ref = unsafe { PageTableNodeRef::<'rcu, C>::borrow_paddr(cur_pt_paddr) };
             node_ref.lock(guard)
         });
         if *pt_guard.stray_mut() {
@@ -142,11 +143,11 @@ fn try_traverse_and_lock_subtree_root<'rcu, C: PageTableConfig>(
             }
             PteStateRef::Absent => {
                 let allocated_guard = cur_entry.alloc_if_none(guard).unwrap();
-                cur_pt_addr = allocated_guard.paddr();
+                cur_pt_paddr = allocated_guard.paddr();
                 cur_node_guard = Some(allocated_guard);
             }
             PteStateRef::PageTable(pt) => {
-                cur_pt_addr = pt.paddr();
+                cur_pt_paddr = pt.paddr();
                 cur_node_guard = None;
             }
         }
@@ -155,7 +156,7 @@ fn try_traverse_and_lock_subtree_root<'rcu, C: PageTableConfig>(
     let mut pt_guard = cur_node_guard.unwrap_or_else(|| {
         // SAFETY: The node must be alive for at least `'rcu` since the
         // address is read from the page table node.
-        let node_ref = unsafe { PageTableNodeRef::<'rcu, C>::borrow_paddr(cur_pt_addr) };
+        let node_ref = unsafe { PageTableNodeRef::<'rcu, C>::borrow_paddr(cur_pt_paddr) };
         node_ref.lock(guard)
     });
     if *pt_guard.stray_mut() {

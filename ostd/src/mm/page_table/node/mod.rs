@@ -222,11 +222,11 @@ impl<'rcu, C: PageTableConfig> PageTableGuard<'rcu, C> {
     /// The caller must ensure that the index is within the bound.
     pub(super) unsafe fn read_pte(&self, idx: usize) -> C::E {
         debug_assert!(idx < nr_subpage_per_huge::<C>());
-        let ptr = paddr_to_vaddr(self.paddr()) as *mut C::E;
+        let ptr = (paddr_to_vaddr(self.paddr()) + idx * size_of::<C::E>()) as *mut C::E;
         // SAFETY:
         // - The page table node is alive. The index is inside the bound, so the page table entry is valid.
         // - All page table entries are aligned and accessed with atomic operations only.
-        unsafe { load_pte(ptr.add(idx), Ordering::Relaxed) }
+        unsafe { load_pte(ptr, Ordering::Relaxed) }
     }
 
     /// Writes a page table entry at a given index.
@@ -243,11 +243,11 @@ impl<'rcu, C: PageTableConfig> PageTableGuard<'rcu, C> {
     ///     after this method.
     pub(super) unsafe fn write_pte(&mut self, idx: usize, pte: C::E) {
         debug_assert!(idx < nr_subpage_per_huge::<C>());
-        let ptr = paddr_to_vaddr(self.paddr()) as *mut C::E;
+        let ptr = (paddr_to_vaddr(self.paddr()) + idx * size_of::<C::E>()) as *mut C::E;
         // SAFETY:
         // - The page table node is alive. The index is inside the bound, so the page table entry is valid.
         // - All page table entries are aligned and accessed with atomic operations only.
-        unsafe { store_pte(ptr.add(idx), pte, Ordering::Release) }
+        unsafe { store_pte(ptr, pte, Ordering::Release) }
     }
 
     /// Gets the mutable reference to the number of valid PTEs in the node.

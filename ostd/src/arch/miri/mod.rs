@@ -51,19 +51,19 @@ pub(crate) fn enable_cpu_features() {
 }
 
 unsafe extern "Rust" {
-    /// Informs KernMiri to alloc `count` pages at `paddr`.
+    /// Informs KernMiri to alloc `page_count` pages at `paddr`.
     ///
     /// Kernel should not allocate a page at the same address twice.
     /// If an address that has already been allocated is allocated again
     /// before being deallocated, KernMiri will treat it as UB.
-    pub fn kern_miri_alloc_pages(paddr: usize, count: usize);
+    pub fn kern_miri_alloc_pages(paddr: usize, page_count: usize);
 
-    /// Informs KernMiri to dealloc `count` pages at `paddr`.
+    /// Informs KernMiri to dealloc `page_count` pages at `paddr`.
     ///
     /// The kernel should only deallocate an address that
     /// has already been allocated by `kern_miri_alloc_pages`;
     /// otherwise, such behavior will be considered UB.
-    pub fn kern_miri_dealloc_pages(paddr: usize, count: usize);
+    pub fn kern_miri_dealloc_pages(paddr: usize, page_count: usize);
 
     /// Informs KernMiri to retype `page_count` pages at `paddr` to `page_type`.
     /// Each slot in the page has both size and alignment being `slot_size`.

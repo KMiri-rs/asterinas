@@ -58,14 +58,21 @@ impl FrameAllocOptions {
             .map(|paddr| Frame::from_unused(paddr, metadata).unwrap())
             .ok_or(Error::NoMemory)?;
 
+        let paddr = frame.paddr();
+        #[cfg(miri)]
+        unsafe {
+            crate::arch::kern_miri_alloc_pages(paddr, 1);
+        }
         if self.zeroed {
-            let addr = paddr_to_vaddr(frame.paddr()) as *mut u8;
+            let vaddr = paddr_to_vaddr(paddr) as *mut u8;
             // SAFETY: The newly allocated frame is guaranteed to be valid.
+            #[cfg(not(miri))]
             unsafe {
-                #[cfg(not(miri))]
-                core::ptr::write_bytes(addr, 0, PAGE_SIZE);
-                #[cfg(miri)]
-                crate::arch::kern_miri_zero(frame.paddr(), 1);
+                core::ptr::write_bytes(vaddr, 0, PAGE_SIZE)
+            };
+            #[cfg(miri)]
+            unsafe {
+                crate::arch::kern_miri_zero(paddr, 1);
             }
         }
 

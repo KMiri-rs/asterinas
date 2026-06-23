@@ -98,7 +98,10 @@ fn try_traverse_and_lock_subtree_root<'rcu, C: PageTableConfig>(
         let start_idx = pte_index::<C>(va.start, cur_level);
         let level_too_high = {
             let end_idx = pte_index::<C>(va.end - 1, cur_level);
-            cur_level > 1 && start_idx == end_idx
+            let page_size = page_size::<C>(cur_level);
+            let range_exactly_fits_one_entry =
+                va.start.is_multiple_of(page_size) && va.end - va.start == page_size;
+            cur_level > 1 && start_idx == end_idx && !range_exactly_fits_one_entry
         };
         if !level_too_high {
             break;

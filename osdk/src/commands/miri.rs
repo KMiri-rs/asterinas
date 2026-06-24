@@ -42,14 +42,15 @@ pub fn miri_current_crate(config: &Config, args: &TestArgs) {
         !runner_self_test,
     );
     let main_rs_path = target_crate_dir.join("src").join("main.rs");
-    let ktest_test_whitelist = match &args.test_name {
-        Some(name) => format!(r#"Some(&["{}"])"#, name),
-        None => r#"None"#.to_string(),
+    let ktest_test_whitelist = if args.test_name.is_empty() {
+        r#"None"#.to_string()
+    } else {
+        format!(r#"Some(&{:?})"#, args.test_name)
     };
-    let mut ktest_crate_whitelist = vec![current_crate.name.clone()];
-    if let Some(name) = &args.test_name {
-        ktest_crate_whitelist.push(name.clone());
-    }
+    let ktest_crate_whitelist = vec![current_crate.name.clone()];
+    // if let Some(name) = &args.test_name {
+    //     ktest_crate_whitelist.push(name.clone());
+    // }
     // Append the ktest static variable and the runner reference to the
     // `main.rs` file.
     let ktest_main_rs = format!(

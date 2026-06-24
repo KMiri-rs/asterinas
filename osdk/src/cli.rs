@@ -344,7 +344,7 @@ pub struct TestArgs {
         name = "TESTNAME",
         help = "Only run tests containing this string in their names"
     )]
-    pub test_name: Option<String>,
+    pub test_name: Vec<String>,
     #[command(flatten)]
     pub common_args: CommonArgs,
 }

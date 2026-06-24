@@ -735,6 +735,43 @@ mod mapping {
     use super::{test_utils::*, *};
 
     #[ktest]
+    fn map_huge_page_in_exact_huge_range() {
+        let pt = PageTable::<TestPtConfig>::empty();
+        let preempt_guard = disable_preempt();
+
+        const HUGE_PAGE_SIZE: usize = PAGE_SIZE * 512; // 2 MiB
+        let range = 0..HUGE_PAGE_SIZE;
+        let prop = PageProperty::new_user(PageFlags::RW, CachePolicy::Writeback);
+
+        let mut cursor = pt.cursor_mut(&preempt_guard, &range).unwrap();
+        unsafe { cursor.map((0, 2, prop)) };
+
+        let probe_va = range.start + HUGE_PAGE_SIZE / 2;
+        assert_eq!(pt.page_walk(probe_va), Some((HUGE_PAGE_SIZE / 2, prop)));
+    }
+
+    #[ktest]
+    fn map_base_pages_one_by_one_in_exact_huge_range() {
+        let pt = PageTable::<TestPtConfig>::empty();
+        let preempt_guard = disable_preempt();
+
+        const HUGE_PAGE_SIZE: usize = PAGE_SIZE * 512; // 2 MiB
+        let range = 0..HUGE_PAGE_SIZE;
+        let prop = PageProperty::new_user(PageFlags::RW, CachePolicy::Writeback);
+
+        let mut cursor = pt.cursor_mut(&preempt_guard, &range).unwrap();
+        for i in 0..4 {
+            let pa = i * PAGE_SIZE;
+            unsafe { cursor.map((pa, 1, prop)) };
+        }
+
+        for i in 0..4 {
+            let va = i * PAGE_SIZE;
+            assert_eq!(pt.page_walk(va), Some((va, prop)));
+        }
+    }
+
+    #[ktest]
     fn mixed_granularity_map_unmap() {
         let pt = PageTable::<TestPtConfig>::empty();
         let preempt_guard = disable_preempt();

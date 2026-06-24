@@ -365,13 +365,17 @@ test:
 		cargo test $(addprefix -p ,$(TEST_PACKAGE_NAMES)); \
 	fi
 
+TEST_CASE ?= \
+						 map_huge_page_in_exact_huge_range \
+						 map_base_pages_one_by_one_in_exact_huge_range
+
 .PHONY: ktest
 ktest: CONSOLE = ttyS0
 ktest: initramfs $(CARGO_OSDK)
 	@# cargo-osdk tests default workspace members.
 	@# `linux-bzimage-setup` is left out of `default-members`
 	@# because it is hard to unit test.
-	@cargo osdk test $(CARGO_OSDK_TEST_ARGS)
+	@cd ostd && cargo osdk test $(TEST_CASE) $(CARGO_OSDK_TEST_ARGS)
 
 .PHONY: docs
 docs: private DEFAULT_PACKAGE_NAMES = \

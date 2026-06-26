@@ -104,6 +104,18 @@ impl<const SLOT_SIZE: usize> Slab<SLOT_SIZE> {
         let head_paddr = slab.paddr();
         let head_vaddr = paddr_to_vaddr(head_paddr);
 
+        // SAFETY: Mark meta pages as Slab in miri.
+        #[cfg(miri)]
+        unsafe {
+            crate::arch::kern_miri_retype_pages(
+                head_paddr,
+                1,
+                crate::arch::PageType::Slab,
+                SLOT_SIZE,
+            );
+            // zeroed is false, so no need to call kern_miri_zero
+        }
+
         // Push each slot to the free list.
         for slot_offset in (0..PAGE_SIZE).step_by(SLOT_SIZE) {
             // SAFETY: The slot is within the slab so it can't be NULL.

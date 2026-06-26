@@ -24,7 +24,8 @@ use core::{
 use crate::task::Task;
 
 pub(crate) unsafe fn late_init_on_bsp() {
-    // unimplemented
+    // SAFETY: We're on the BSP and we're ready to boot all APs.
+    unsafe { crate::boot::smp::boot_all_aps() };
 }
 
 ///

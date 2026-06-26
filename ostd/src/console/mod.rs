@@ -10,6 +10,12 @@ pub mod uart_ns16650a;
 
 /// Prints formatted arguments to the console.
 pub fn early_print(args: Arguments) {
+    #[cfg(miri)]
+    {
+        miri_println!("{args}");
+        return;
+    }
+
     let Some(serial) = SERIAL_PORT.get() else {
         return;
     };

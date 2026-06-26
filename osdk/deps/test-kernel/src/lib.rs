@@ -6,7 +6,11 @@
 
 #![no_std]
 #![forbid(unsafe_code)]
-#![cfg_attr(miri, feature(core_intrinsics), allow(internal_features, unused))]
+#![cfg_attr(
+    miri,
+    feature(core_intrinsics, format_args_nl),
+    allow(internal_features, unused)
+)]
 
 extern crate alloc;
 
@@ -87,8 +91,8 @@ fn miri_main() {}
 #[cfg(miri)]
 #[ostd::ktest::panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
-    use core::intrinsics::abort;
-    abort();
+    ostd::miri_println!("An uncaught panic occurred: {info}");
+    core::intrinsics::abort();
 }
 
 /// Run all the tests registered by `#[ktest]` in the `.ktest_array` section.

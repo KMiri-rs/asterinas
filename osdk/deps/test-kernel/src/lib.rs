@@ -83,11 +83,6 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     ostd::prelude::abort();
 }
 
-/// The entry point of the miri runner.
-#[cfg(miri)]
-#[ostd::ktest::miri_main]
-fn miri_main() {}
-
 #[cfg(miri)]
 #[ostd::ktest::panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {

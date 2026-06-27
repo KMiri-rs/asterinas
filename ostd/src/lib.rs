@@ -165,6 +165,7 @@ unsafe fn init() {
 
     arch::irq::enable_local();
 
+    #[cfg(not(miri))]
     invoke_ffi_init_funcs();
 
     IN_BOOTSTRAP_CONTEXT.store(false, Ordering::Relaxed);

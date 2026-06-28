@@ -344,10 +344,6 @@ impl EarlyFrameAllocator {
                 #[cfg(miri)]
                 unsafe {
                     crate::arch::kern_miri_alloc_pages(allocated, size / PAGE_SIZE)
-                    // FIXME: where is deallocated function?
-                    // CountingFrameAllocator was removed since https://github.com/asterinas/asterinas/commit/5f05963e
-                    // while atc'25 have a pairing kern_miri_dealloc_pages
-                    // https://github.com/KMiri-rs/asterinas-atc25-artifact-evaluation/blob/59dca48f8b2d9d3e5edd8ef89443417b57749682/ostd/src/mm/frame/allocator.rs#L180
                 };
 
                 return Some(allocated);

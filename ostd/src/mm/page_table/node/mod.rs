@@ -76,7 +76,6 @@ impl<C: PageTableConfig> PageTableNode<C> {
 
         #[cfg(miri)]
         unsafe {
-            miri_println!("PageTableNode: 0x{:x}", page.paddr());
             crate::arch::kern_miri_retype_pages(
                 page.paddr(),
                 1,

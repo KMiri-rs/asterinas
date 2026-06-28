@@ -259,11 +259,6 @@ impl<M: AnyFrameMeta + ?Sized> Drop for Frame<M> {
             // SAFETY: this is the last reference and is about to be dropped.
             unsafe { self.slot().drop_last_in_place() };
 
-            let paddr = self.paddr();
-            miri_println!(
-                "[Frame drop/delloc] paddr=0x{paddr:x}..0x{:x}",
-                paddr + PAGE_SIZE
-            );
             allocator::get_global_frame_allocator().dealloc(self.paddr(), PAGE_SIZE);
         }
     }

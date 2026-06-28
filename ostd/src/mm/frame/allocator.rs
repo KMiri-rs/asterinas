@@ -219,21 +219,8 @@ pub(crate) unsafe fn init() {
     // Retire the early allocator.
     let early_allocator = EARLY_ALLOCATOR.lock().take().unwrap();
     let (range_1, range_2) = early_allocator.allocated_regions();
-    miri_println!(
-        "range_1: 0x{:x}..0x{:x}; range_2: 0x{:x}..0x{:x}",
-        range_1.start,
-        range_1.end,
-        range_2.start,
-        range_2.end
-    );
 
     for region in regions.iter() {
-        miri_println!(
-            "region: 0x{:x}..0x{:x} => {:?}",
-            region.base(),
-            region.base() + region.len(),
-            region.typ()
-        );
         if region.typ() == MemoryRegionType::Usable {
             debug_assert!(region.base().is_multiple_of(PAGE_SIZE));
             debug_assert!(region.len().is_multiple_of(PAGE_SIZE));
@@ -241,10 +228,8 @@ pub(crate) unsafe fn init() {
             // Add global free pages to the frame allocator.
             // Truncate the early allocated frames if there is an overlap.
             for r1 in range_difference(&(region.base()..region.end()), &range_1) {
-                miri_println!("  r1: 0x{:x}..0x{:x}", r1.start, r1.end);
                 for r2 in range_difference(&r1, &range_2) {
-                    miri_println!("  r2: 0x{:x}..0x{:x}", r2.start, r2.end);
-                    miri_println!("Adding free frames to the allocator: {:x?}", r2);
+                    crate::info!("Adding free frames to the allocator: {:x?}", r2);
                     get_global_frame_allocator().add_free_memory(r2.start, r2.len());
                 }
             }

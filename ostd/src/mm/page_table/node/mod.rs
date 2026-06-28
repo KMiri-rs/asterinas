@@ -81,7 +81,7 @@ impl<C: PageTableConfig> PageTableNode<C> {
                 page.paddr(),
                 1,
                 crate::arch::PageType::PageTable,
-                8,
+                C::PTE_SIZE,
             );
         }
 

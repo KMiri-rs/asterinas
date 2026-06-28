@@ -75,11 +75,13 @@ pub(crate) unsafe fn dismiss() {
     if DISMISS_COUNT.fetch_add(1, Ordering::AcqRel) as usize == num_cpus() - 1 {
         let boot_pt = BOOT_PAGE_TABLE.lock().take().unwrap();
 
+        miri_println!("root_pt=0x{:x}", boot_pt.root_pt);
         dfs_walk_on_leave::<PageTableEntry, PagingConsts>(
             boot_pt.root_pt,
             PagingConsts::NR_LEVELS,
             &mut |pte, pa, _, flags| {
                 if !flags.contains(PTE_POINTS_TO_FIRMWARE_PT) {
+                    miri_println!("[boot_pt dismiss] pa=0x{pa:x}");
                     // SAFETY: The pointed frame is allocated and forgotten with `into_raw`.
                     drop(unsafe { Frame::<EarlyAllocatedFrameMeta>::from_raw(pa) })
                 }
@@ -296,6 +298,7 @@ impl<E: PteTrait, C: PagingConstsTrait> BootPageTable<E, C> {
         #[cfg(miri)]
         unsafe {
             use crate::arch::{PageType, kern_miri_retype_pages, kern_miri_zero};
+            miri_println!("boot_pt: 0x{frame_paddr:x}");
             kern_miri_zero(frame_paddr, 1);
             kern_miri_retype_pages(frame_paddr, 1, PageType::PageTable, C::PTE_SIZE);
         }
@@ -333,6 +336,7 @@ fn dfs_walk_on_leave<E: PteTrait, C: PagingConstsTrait>(
         for offset in 0..nr_subpage_per_huge::<C>() {
             // SAFETY: The result pointer is within the PT frame.
             let pte_ptr = (pt_vaddr + offset * size) as *mut E;
+            miri_println!("pt=0x{pt:x} size={size} offset={offset} pte_ptr={pte_ptr:p}");
             // SAFETY: The pointer to the entry is valid to read.
             let mut pte = unsafe { pte_ptr.read() };
 

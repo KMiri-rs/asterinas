@@ -80,10 +80,20 @@ pub(crate) unsafe fn dismiss() {
             boot_pt.root_pt,
             PagingConsts::NR_LEVELS,
             &mut |pte, pa, _, flags| {
+                // SAFETY: this callback is called only once even though the walk traverses all ptes.
+                #[cfg(miri)]
+                unsafe {
+                    crate::arch::kern_miri_zero(pa, 1);
+                }
                 if !flags.contains(PTE_POINTS_TO_FIRMWARE_PT) {
                     miri_println!("[boot_pt dismiss] pa=0x{pa:x}");
                     // SAFETY: The pointed frame is allocated and forgotten with `into_raw`.
-                    drop(unsafe { Frame::<EarlyAllocatedFrameMeta>::from_raw(pa) })
+                    drop(unsafe { Frame::<EarlyAllocatedFrameMeta>::from_raw(pa) });
+                    // SAFETY: this callback is called only once even though the walk traverses all ptes.
+                    #[cfg(miri)]
+                    unsafe {
+                        crate::arch::kern_miri_dealloc_pages(pa, 1);
+                    }
                 }
                 // Firmware provided page tables may be a DAG instead of a tree.
                 // Clear it to avoid double-free when we meet it the second time.

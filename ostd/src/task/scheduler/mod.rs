@@ -498,6 +498,7 @@ pub(crate) fn unpark_target(runnable: Arc<Task>) {
 pub fn kernel_task_entry(_temp: usize) {
     // See `switch_to_task` for why we need this.
     crate::arch::irq::enable_local();
+    miri_println!("[kernel_task_entry]");
 
     let current_task =
         Task::current().expect("no current task, it should have current task in kernel task entry");
@@ -533,6 +534,12 @@ unsafe extern "Rust" {
 pub(super) fn run_new_task(runnable: Arc<Task>) {
     let preempt_cpu = scheduler_singleton().enqueue(runnable.clone(), EnqueueFlags::Spawn);
 
+    let stack_end = runnable.kstack.end_vaddr();
+    let stack_size = super::kernel_stack::KERNEL_STACK_SIZE;
+    miri_println!(
+        "unnable.kstack.end_vaddr=0x{stack_end:x} stack_size=0x{stack_size:x} stack_range=0x{:x}..0x{stack_end:x}",
+        stack_end - stack_size,
+    );
     #[cfg(miri)]
     unsafe {
         miri_create_new_thread(

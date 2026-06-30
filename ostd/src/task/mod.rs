@@ -199,6 +199,7 @@ impl TaskOptions {
         let kstack = KernelStack::new_with_guard_page()?;
 
         let mut ctx = TaskContext::new();
+        #[cfg(not(miri))]
         ctx.set_instruction_pointer(
             crate::arch::task::kernel_task_entry_wrapper as *const () as usize,
         );

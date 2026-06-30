@@ -498,7 +498,10 @@ pub(crate) fn unpark_target(runnable: Arc<Task>) {
 pub fn kernel_task_entry(_temp: usize) {
     // See `switch_to_task` for why we need this.
     crate::arch::irq::enable_local();
+    let _a = &_temp;
+    miri_println!("[kernel_task_entry]");
 
+    // miri_println!("[kernel_task_entry]");
     let current_task =
         Task::current().expect("no current task, it should have current task in kernel task entry");
 

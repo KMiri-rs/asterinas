@@ -11,6 +11,7 @@ use crate::{
     mm::{
         HasSize, PAGE_SIZE, Paddr, Split, Vaddr,
         frame::{Frame, meta::AnyFrameMeta},
+        paddr_to_vaddr,
         page_prop::PageProperty,
         page_table::largest_pages,
     },
@@ -135,7 +136,13 @@ impl KVirtArea {
         let range = kvirt_area_allocator(&irq_guard).alloc(area_size).unwrap();
         let cursor_range = range.start + map_offset..range.end;
 
-        crate::miri_println!("map: 0x{:x}-0x{:x}", range.start, range.end);
+        crate::miri_println!(
+            "map: range=0x{:x}-0x{:x} area_size=0x{area_size:x} map_offset=0x{map_offset:x} cursor_range=0x{:x}..0x{:x}",
+            range.start,
+            range.end,
+            cursor_range.start,
+            cursor_range.end
+        );
 
         let page_table = KERNEL_PAGE_TABLE.get().unwrap();
         let mut cursor = page_table.cursor_mut(&irq_guard, &cursor_range).unwrap();
@@ -143,6 +150,12 @@ impl KVirtArea {
         for frame in frames.into_iter() {
             // SAFETY: The constructor of the `KVirtArea` has already ensured
             // that this mapping does not affect kernel's memory safety.
+            let paddr = frame.clone().into_raw();
+            miri_println!(
+                "frame paddr=0x{paddr:x} vaddr=0x{:x} va_cursor=0x{:x}",
+                paddr_to_vaddr(paddr),
+                cursor.virt_addr()
+            );
             unsafe { cursor.map(MappedItem::Tracked(Frame::from_unsized(frame), prop)) };
         }
 

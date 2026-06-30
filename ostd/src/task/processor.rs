@@ -19,6 +19,10 @@ cpu_local_cell! {
 ///
 /// It returns `None` if the function is called in the bootstrap context.
 pub(super) fn current_task() -> Option<NonNull<Task>> {
+    miri_println!(
+        "[current_task] &CURRENT_TASK_PTR={:p}",
+        &raw const CURRENT_TASK_PTR,
+    );
     NonNull::new(CURRENT_TASK_PTR.load().cast_mut())
 }
 
@@ -77,6 +81,11 @@ pub(super) fn switch_to_task(next_task: Arc<Task>) {
         // We've switched to the first task on the current CPU.
         unreachable!("`first_context_switch` should never return");
     };
+
+    miri_println!(
+        "[switch_to_task] next_task_addr={:p}",
+        miri_next_task.as_ref()
+    );
 
     // SAFETY:
     // 1. We have exclusive access to both the current context and the next context (see above).

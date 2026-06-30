@@ -96,6 +96,7 @@ impl Task {
     /// It returns `None` if the function is called in the bootstrap context.
     pub fn current() -> Option<CurrentTask> {
         let current_task = current_task()?;
+        miri_println!("current_task={current_task:p}");
 
         // SAFETY: `current_task` is the current task.
         Some(unsafe { CurrentTask::new(current_task) })

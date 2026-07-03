@@ -136,45 +136,14 @@ pub fn miri_main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let main_fn = parse_macro_input!(item as ItemFn);
     let main_fn_name = &main_fn.sig.ident;
 
-    let mut extern_declarations = Vec::new();
-    let mut function_calls = Vec::new();
-    // FIXME: not sure why to generate these extern functions.
-    for i in 1..=80 {
-        let test_name = Ident::new(
-            &format!("ktest_ostd_extern_{}", i),
-            proc_macro2::Span::call_site(),
-        );
-        extern_declarations.push(quote! {
-            fn #test_name();
-        });
-        function_calls.push(quote! {
-            #test_name();
-        });
-    }
-
-    let expanded = quote! {
-        unsafe extern "Rust" {
-            #(#extern_declarations)*
-        }
-    };
-
-    let expanded_calls = quote! {
-        #(#function_calls)*
-    };
-
     quote!(
-        #[cfg(miri)]
-        #expanded
-
         #[cfg(miri)]
         #[unsafe(no_mangle)]
         extern "Rust" fn __ostd_main() {
             #main_fn_name();
 
             let task0 = move || {
-                unsafe {
-                    #expanded_calls();
-                }
+                ostd::miri_println!("Hello from task0!");
             };
 
             let task0 = alloc::sync::Arc::new(

@@ -514,6 +514,7 @@ pub fn kernel_task_entry(_temp: usize) {
 
 #[expect(missing_docs)]
 unsafe extern "Rust" {
+    // FIXME: remove the `arg` input and make func take nothing
     pub fn miri_create_new_thread(
         func: fn(usize),
         arg: usize,
@@ -521,6 +522,11 @@ unsafe extern "Rust" {
         stack_end: usize,
         stack_size: usize,
     );
+
+    /// # Safety
+    ///
+    /// This should be called only when the thread is about to terminate.
+    pub fn miri_terminate_current_thread();
 
     pub fn miri_switch_to(task: &Task);
 
@@ -534,6 +540,7 @@ unsafe extern "Rust" {
 pub(super) fn run_new_task(runnable: Arc<Task>) {
     let preempt_cpu = scheduler_singleton().enqueue(runnable.clone(), EnqueueFlags::Spawn);
 
+    // FIXME: need to handle multi-cpu switch/preempt.
     let stack_end = runnable.kstack.end_vaddr();
     let stack_size = super::kernel_stack::KERNEL_STACK_SIZE;
     miri_println!(
@@ -576,6 +583,8 @@ fn set_need_preempt(cpu_id: CpuId) {
 #[track_caller]
 pub(super) fn exit_current() -> ! {
     let mut is_first_try = true;
+    // Retry 100 times and do nothing.
+    let mut retry = 100;
 
     reschedule(|local_rq: &mut dyn LocalRunQueue| {
         let next_task_opt = if is_first_try {
@@ -588,7 +597,11 @@ pub(super) fn exit_current() -> ! {
         };
 
         if let Some(next_task) = next_task_opt {
-            ReschedAction::SwitchTo(next_task.clone())
+            return ReschedAction::SwitchTo(next_task.clone());
+        }
+        retry -= 1;
+        if retry == 0 {
+            ReschedAction::DoNothing
         } else {
             ReschedAction::Retry
         }
@@ -632,6 +645,11 @@ where
 
         match action {
             ReschedAction::DoNothing => {
+                // SAFETY: we retried many times to switch to another task, but nothing needs to do.
+                // So terminate the task.
+                unsafe {
+                    miri_terminate_current_thread();
+                }
                 return;
             }
             ReschedAction::Retry => {

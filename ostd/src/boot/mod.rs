@@ -176,6 +176,7 @@ pub(crate) fn parse_early_cmdline() -> EarlyCmdline {
 /// [`arch::boot`] module.
 ///
 /// [`arch::boot`]: crate::arch::boot
+#[cfg(not(miri))]
 pub(crate) unsafe fn start_kernel() -> ! {
     // The entry point of kernel code, which should be defined by the package that
     // uses OSTD.

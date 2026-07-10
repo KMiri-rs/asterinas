@@ -55,7 +55,7 @@ fn parse_memory_regions() -> MemoryRegionArray {
     regions.into_non_overlapping()
 }
 
-use crate::boot::{EARLY_INFO, EarlyBootInfo, start_kernel};
+use crate::boot::{EARLY_INFO, EarlyBootInfo};
 
 /// The entry point of the Rust code portion of Asterinas.
 #[unsafe(no_mangle)]

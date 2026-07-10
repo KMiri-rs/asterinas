@@ -156,10 +156,7 @@ pub fn miri_main(_attr: TokenStream, item: TokenStream) -> TokenStream {
             task0.run();
             ostd::task::Task::yield_now();
 
-            // FIXME: restore miri_println once the macro is available.
-            // ostd::miri_println!("finish running");
-
-            //core::intrinsics::abort();
+            ostd::miri_println!("__ostd_main finished running");
         }
 
         #[cfg(miri)]

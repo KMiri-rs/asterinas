@@ -69,6 +69,12 @@ pub fn miri_boot() {
         memory_regions: parse_memory_regions(),
     });
 
-    // Safety: miri should support this.
-    unsafe { start_kernel() };
+    // SAFETY: The function is called only once on the BSP.
+    unsafe { crate::init() };
+
+    // SAFETY: `miri_main` should define this.
+    unsafe extern "Rust" {
+        fn __ostd_main();
+    }
+    unsafe { __ostd_main() };
 }

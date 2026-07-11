@@ -526,11 +526,6 @@ unsafe extern "Rust" {
         stack_size: usize,
     );
 
-    /// # Safety
-    ///
-    /// This should be called only when the thread is about to terminate.
-    pub fn miri_terminate_current_thread();
-
     pub fn miri_switch_to(task: &Task);
 
     pub fn miri_load_cpu_local(addr: *const u8) -> *const u8;

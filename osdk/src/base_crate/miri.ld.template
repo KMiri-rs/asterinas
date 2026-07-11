@@ -159,7 +159,6 @@ SECTIONS
         kern_miri_record_time = .;
         kern_miri_get_cpu_local_base = .;
         kern_miri_set_cpu_local_base = .;
-        miri_terminate_current_thread = .;
         miri_spin_loop = .;
         miri_write_to_stdout = .;
         miri_create_new_thread = .;

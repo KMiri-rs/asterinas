@@ -509,7 +509,10 @@ pub fn kernel_task_entry(_temp: usize) {
         .expect("task function is `None` when trying to run");
     task_func();
 
+    #[cfg(not(miri))]
     exit_current();
+    #[cfg(miri)]
+    kmiri_exit_current();
 }
 
 #[expect(missing_docs)]
@@ -610,6 +613,36 @@ pub(super) fn exit_current() -> ! {
     unreachable!()
 }
 
+/// This should align with `exit_current`, but should normally return,
+/// because kmiri handles the task/thread switch.
+#[cfg(miri)]
+pub(super) fn kmiri_exit_current() {
+    let mut is_first_try = true;
+    // Retry 100 times and do nothing.
+    let mut retry = 100;
+
+    reschedule(|local_rq: &mut dyn LocalRunQueue| {
+        let next_task_opt = if is_first_try {
+            is_first_try = false;
+            let should_pick_next = local_rq.update_current(UpdateFlags::Exit);
+            let _current = local_rq.dequeue_current();
+            should_pick_next.then(|| local_rq.pick_next())
+        } else {
+            local_rq.try_pick_next()
+        };
+
+        if let Some(next_task) = next_task_opt {
+            return ReschedAction::SwitchTo(next_task.clone());
+        }
+        retry -= 1;
+        if retry == 0 {
+            ReschedAction::DoNothing
+        } else {
+            ReschedAction::Retry
+        }
+    });
+}
+
 /// Yields execution.
 #[track_caller]
 pub(super) fn yield_now() {
@@ -645,11 +678,6 @@ where
 
         match action {
             ReschedAction::DoNothing => {
-                // SAFETY: we retried many times to switch to another task, but nothing needs to do.
-                // So terminate the task.
-                unsafe {
-                    miri_terminate_current_thread();
-                }
                 return;
             }
             ReschedAction::Retry => {

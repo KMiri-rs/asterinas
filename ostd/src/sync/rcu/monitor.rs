@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use alloc::collections::VecDeque;
-use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
 use crate::{
     cpu::{AtomicCpuSet, CpuId, CpuSet, PinCurrentCpu},
@@ -66,7 +66,7 @@ impl RcuMonitor {
 
         // Invoke the callbacks to notify the completion of GP
         for f in callbacks {
-            (f)();
+            // (f)();
         }
     }
 
@@ -76,7 +76,20 @@ impl RcuMonitor {
     {
         let mut state = self.state.disable_irq().lock();
 
-        state.next_callbacks.push_back(Box::new(f));
+        static N: AtomicU32 = AtomicU32::new(0);
+        let id = N.fetch_add(1, Relaxed);
+        // if id > 32 {
+        //     return;
+        // }
+        let len = state.next_callbacks.len();
+        let cap = state.next_callbacks.capacity();
+        let (ptr1, _ptr2) = state.next_callbacks.as_slices();
+        miri_println!("push_back: [before] id={id} len={len} cap={cap} ptr1={ptr1:p}");
+        state.next_callbacks.push_back(0);
+        let len = state.next_callbacks.len();
+        let cap = state.next_callbacks.capacity();
+        let (ptr1, _ptr2) = state.next_callbacks.as_slices();
+        miri_println!("push_back: [after ] id={id} len={len} cap={cap} ptr1={ptr1:p}");
 
         if !state.current_gp.is_complete() {
             return;
@@ -102,7 +115,7 @@ impl State {
     }
 }
 
-type Callbacks = VecDeque<Box<dyn FnOnce() + Send + 'static>>;
+type Callbacks = VecDeque<u8>;
 
 struct GracePeriod {
     callbacks: Callbacks,

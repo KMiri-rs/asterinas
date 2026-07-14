@@ -2,13 +2,9 @@
 
 use alloc::string::ToString;
 
-use ostd::{
-    arch::{
-        irq::{IRQ_CHIP, MappedIrqLine},
-        serial::SERIAL_PORT,
-    },
-    irq::IrqLine,
-};
+#[cfg(not(miri))]
+use ostd::arch::irq::{IRQ_CHIP, MappedIrqLine};
+use ostd::{arch::serial::SERIAL_PORT, irq::IrqLine};
 use spin::Once;
 
 use crate::{
@@ -21,8 +17,13 @@ use crate::{
 const ISA_INTR_NUM: u8 = 4;
 
 /// IRQ line for UART serial.
+#[cfg(not(miri))]
 static IRQ_LINE: Once<MappedIrqLine> = Once::new();
 
+#[cfg(miri)]
+pub(super) fn init() {}
+
+#[cfg(not(miri))]
 pub(super) fn init() {
     let Some(uart) = SERIAL_PORT.get() else {
         return;

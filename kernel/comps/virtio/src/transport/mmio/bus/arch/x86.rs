@@ -9,6 +9,7 @@ use spin::Once;
 
 use crate::transport::mmio::bus::MmioRegisterError;
 
+#[cfg(not(miri))]
 pub(super) fn probe_for_device() {
     probe_from_kernel_cmdline();
     probe_from_microvm_constants();

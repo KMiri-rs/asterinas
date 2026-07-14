@@ -8,8 +8,10 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use bitflags::bitflags;
+#[cfg(not(miri))]
+use ostd::arch::kernel::ACPI_INFO;
 use ostd::{
-    arch::{device::io_port::ReadWriteAccess, kernel::ACPI_INFO},
+    arch::device::io_port::ReadWriteAccess,
     io::IoPort,
     sync::{LocalIrqDisabled, SpinLock},
 };
@@ -167,6 +169,9 @@ impl I8042Controller {
     }
 
     fn is_present_acpi() -> bool {
+        #[cfg(miri)]
+        return false;
+        #[cfg(not(miri))]
         ACPI_INFO
             .get()
             .unwrap()

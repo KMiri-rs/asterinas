@@ -15,7 +15,7 @@ use inherit_methods_macro::inherit_methods;
 
 pub(crate) use self::allocator::IoMemAllocatorBuilder;
 pub(super) use self::allocator::init;
-#[cfg(all(target_arch = "x86_64", feature = "cvm_guest"))]
+#[cfg(all(target_arch = "x86_64", not(miri), feature = "cvm_guest"))]
 use crate::arch::{if_tdx_enabled, tdx_guest::unprotect_gpa_tdvm_call};
 use crate::{
     Error,

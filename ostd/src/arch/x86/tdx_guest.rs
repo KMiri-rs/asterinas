@@ -81,7 +81,7 @@ impl TargetPageState {
     fn as_gpa_mask(self) -> u64 {
         match self {
             Self::Private => 0,
-            Self::Shared => SHARED_MASK.load(core::sync::atomic::Ordering::Relaxed)
+            Self::Shared => SHARED_MASK.load(core::sync::atomic::Ordering::Relaxed),
         }
     }
 }

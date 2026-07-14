@@ -36,7 +36,7 @@ struct DmaBufferMeta;
 impl_frame_meta_for!(DmaBufferMeta);
 
 // TODO: Implement other architectures when their `IommuPtConfig` are ready.
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
 mod allocator {
     use crate::{
         arch::iommu,
@@ -79,11 +79,11 @@ static PADDR_REF_CNTS: SpinLock<RangeCounter, LocalIrqDisabled> =
     SpinLock::new(RangeCounter::new());
 
 pub(super) fn cvm_need_private_protection() -> bool {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     {
         crate::arch::if_tdx_enabled!({ true } else { false })
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(any(not(target_arch = "x86_64"), miri))]
     {
         false
     }
@@ -112,7 +112,7 @@ pub(super) fn alloc_kva(
 
     #[cfg_attr(not(target_arch = "x86_64"), expect(unused_labels))]
     let priv_flags = 'priv_flags: {
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(target_arch = "x86_64", not(miri)))]
         crate::if_tdx_enabled!({ break 'priv_flags PrivilegedPageFlags::SHARED });
 
         PrivilegedPageFlags::empty()
@@ -198,7 +198,7 @@ unsafe fn alloc_unprotect_physical_range(pa_range: &Range<Paddr>) {
 
     let mut refcnts = PADDR_REF_CNTS.lock();
     let ranges = refcnts.add(&pfn_range);
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     crate::arch::if_tdx_enabled!({
         for partial in ranges {
             debug_assert_eq!(partial, pfn_range.clone());
@@ -235,7 +235,7 @@ unsafe fn dealloc_protect_physical_range(pa_range: &Range<Paddr>) {
 
     let mut refcnts = PADDR_REF_CNTS.lock();
     let _removed_frames = refcnts.remove(&pfn_range);
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     crate::arch::if_tdx_enabled!({
         for removed in _removed_frames {
             // SAFETY:
@@ -277,11 +277,11 @@ unsafe fn dma_remap(pa_range: &Range<Paddr>) -> Option<Daddr> {
 
     let _irq_guard = irq::disable_local();
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     let daddr = allocator::daddr_allocator(&_irq_guard)
         .alloc(pa_range.len())
         .expect("failed to allocate DMA address range");
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(any(not(target_arch = "x86_64"), miri))]
     let daddr = pa_range.clone();
 
     for map_paddr in pa_range.clone().step_by(PAGE_SIZE) {

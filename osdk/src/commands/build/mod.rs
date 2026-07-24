@@ -74,12 +74,12 @@ pub fn create_base_and_cached_build(
     config: &Config,
     action: ActionChoice,
     rustflags: &[&str],
-) -> Bundle {
+) -> Option<Bundle> {
     let base_crate_path = new_base_crate(
         match action {
             ActionChoice::Run => BaseCrateType::Run,
             ActionChoice::Test => BaseCrateType::Test,
-            ActionChoice::Miri => BaseCrateType::Miri,
+            ActionChoice::Miri | ActionChoice::MiriDebugger => BaseCrateType::Miri,
         },
         osdk_output_directory.as_ref().join(&target_crate.name),
         &target_crate.name,
@@ -132,34 +132,15 @@ pub fn do_cached_build(
     config: &Config,
     action: ActionChoice,
     rustflags: &[&str],
-) -> Bundle {
-    let (build, boot, grub) = match action {
-        ActionChoice::Run => (&config.run.build, &config.run.boot, &config.run.grub),
-        ActionChoice::Test | ActionChoice::Miri => {
-            (&config.test.build, &config.test.boot, &config.test.grub)
-        }
-    };
-    let is_miri = matches!(action, ActionChoice::Miri);
-
-    let mut rustflags = rustflags.to_vec();
-    rustflags.push(&build.rustflags);
-    let aster_elf = build_kernel_elf(
-        config.target_arch,
-        &build.profile,
-        &build.features[..],
-        build.no_default_features,
-        &build.override_configs[..],
-        &cargo_target_directory,
-        &rustflags,
-        is_miri,
-    );
+) -> Option<Bundle> {
+    let aster_elf = build_kernel_elf(config, &cargo_target_directory, rustflags, action)?;
 
     // Check the existing bundle's reusability
     if let Some(existing_bundle) = get_reusable_existing_bundle(&bundle_path, config, action)
         && aster_elf.modified_time() < &existing_bundle.last_modified_time()
     {
         info!("Reusing existing bundle: aster_elf is unchanged");
-        return existing_bundle;
+        return Some(existing_bundle);
     }
 
     // Build a new bundle
@@ -169,23 +150,21 @@ pub fn do_cached_build(
     }
     let mut bundle = Bundle::new(&bundle_path, config, action);
 
-    if is_miri {
-        return bundle;
-    }
+    let boot_elf =
+        make_stripped_boot_elf(&osdk_output_directory, &aster_elf, config.build.strip_elf);
 
-    let boot_elf = make_stripped_boot_elf(&osdk_output_directory, &aster_elf, build.strip_elf);
-
-    match boot.method {
+    let action_config = config.action(action);
+    match action_config.boot.method {
         BootMethod::GrubRescueIso | BootMethod::GrubQcow2 => {
             info!("Building boot device image");
             let bootdev_image = grub::create_bootdev_image(
                 &osdk_output_directory,
                 &boot_elf,
-                boot.initramfs.as_ref(),
+                action_config.boot.initramfs.as_ref(),
                 config,
                 action,
             );
-            if matches!(boot.method, BootMethod::GrubQcow2) {
+            if matches!(action_config.boot.method, BootMethod::GrubQcow2) {
                 let qcow2_image = qcow2::convert_iso_to_qcow2(bootdev_image);
                 bundle.consume_vm_image(qcow2_image);
             } else {
@@ -194,12 +173,12 @@ pub fn do_cached_build(
             bundle.consume_aster_bin(aster_elf);
         }
         BootMethod::QemuDirect => {
-            let aster_bin = match grub.boot_protocol {
+            let aster_bin = match action_config.grub.boot_protocol {
                 BootProtocol::Linux => make_install_bzimage(
                     &osdk_output_directory,
                     &osdk_output_directory,
                     &boot_elf,
-                    build.linux_x86_legacy_boot,
+                    action_config.build.linux_x86_legacy_boot,
                     config.build.encoding.clone(),
                 ),
                 _ => make_elf_for_qemu(boot_elf),
@@ -208,27 +187,32 @@ pub fn do_cached_build(
         }
     }
 
-    bundle
+    Some(bundle)
 }
 
 fn build_kernel_elf(
-    arch: Arch,
-    profile: &str,
-    features: &[String],
-    no_default_features: bool,
-    override_configs: &[String],
+    config: &Config,
     cargo_target_directory: impl AsRef<Path>,
     rustflags: &[&str],
-    is_miri: bool,
-) -> AsterBin {
+    action: ActionChoice,
+) -> Option<AsterBin> {
+    let arch = config.target_arch;
+    let build = &config.action(action).build;
+    let profile = &build.profile;
+    let features = &build.features[..];
+    let cargo_target_directory = cargo_target_directory.as_ref();
+
+    let mut rustflags = rustflags.to_vec();
+    rustflags.push(&build.rustflags);
+
     let target_os_string = OsString::from(&arch.triple());
+    let is_miri = matches!(action, ActionChoice::Miri | ActionChoice::MiriDebugger);
     let rustc_linker_script_arg = if is_miri {
         "-C link-arg=-Tmiri.ld".to_owned()
     } else {
         format!("-C link-arg=-T{}.ld", arch)
     };
 
-    let mut rustflags = Vec::from(rustflags);
     // Asterinas does not support PIC yet.
     rustflags.extend([
         &rustc_linker_script_arg,
@@ -277,22 +261,34 @@ fn build_kernel_elf(
     );
 
     command.env("RUSTFLAGS", rustflags.join(" "));
-    if is_miri {
+    if action == ActionChoice::MiriDebugger {
+        command.args(["kmiri-helper"]);
+    } else if action == ActionChoice::Miri {
+        if config.miri_debugger {
+            const MIRIFLAGS: &str = "MIRIFLAGS";
+            let mut miriflags = std::env::var(MIRIFLAGS).unwrap_or_default();
+            let arg_debugger = "--debugger";
+            if !miriflags.contains(arg_debugger) {
+                miriflags.push(' ');
+                miriflags.push_str(arg_debugger);
+            }
+            command.env(MIRIFLAGS, miriflags);
+            command.env("__KMIRI_DIR_TARGET", cargo_target_directory);
+        }
+
         command.args(["miri", "run"]);
     } else {
         command.arg("build");
     }
     command.arg("--features").arg(features.join(" "));
-    if no_default_features {
+    if build.no_default_features {
         command.arg("--no-default-features");
     }
     command.arg("--target").arg(&target_os_string);
-    command
-        .arg("--target-dir")
-        .arg(cargo_target_directory.as_ref());
+    command.arg("--target-dir").arg(cargo_target_directory);
     command.args(COMMON_CARGO_ARGS);
     command.arg("--profile=".to_string() + profile);
-    for override_config in override_configs {
+    for override_config in &build.override_configs {
         command.arg("--config").arg(override_config);
     }
 
@@ -317,8 +313,12 @@ fn build_kernel_elf(
         process::exit(Errno::ExecuteCommand as _);
     }
 
+    if is_miri {
+        return None;
+    }
+
     let aster_bin_path = {
-        let mut path = cargo_target_directory.as_ref().to_path_buf();
+        let mut path = cargo_target_directory.to_path_buf();
         if is_miri {
             path = path.join("miri");
         }
@@ -327,7 +327,7 @@ fn build_kernel_elf(
             .join(get_current_crates().remove(0).name)
     };
 
-    AsterBin::new(
+    Some(AsterBin::new(
         aster_bin_path,
         arch,
         AsterBinType::Elf(AsterElfMeta {
@@ -338,7 +338,7 @@ fn build_kernel_elf(
         }),
         get_current_crates().remove(0).version,
         false,
-    )
+    ))
 }
 
 fn get_last_modified_time(path: impl AsRef<Path>) -> SystemTime {

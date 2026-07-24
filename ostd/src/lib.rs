@@ -32,11 +32,11 @@ macro_rules! __log_prefix {
 macro_rules! miri_println {
     () => {
         #[cfg(miri)]
-        $crate::miri_print!("\n");
+        $crate::miri_print!("\n")
     };
     ($($arg:tt)*) => {
         #[cfg(miri)]
-        $crate::arch::_miri_print(::core::format_args_nl!($($arg)*));
+        $crate::arch::_miri_print(::core::format_args_nl!($($arg)*))
     };
 }
 

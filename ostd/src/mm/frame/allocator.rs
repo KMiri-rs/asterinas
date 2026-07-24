@@ -72,6 +72,8 @@ impl FrameAllocOptions {
             };
             #[cfg(miri)]
             unsafe {
+                let paddr = frame.paddr();
+                crate::arch::kern_miri_alloc_pages(paddr, 1);
                 crate::arch::kern_miri_zero(paddr, 1);
             }
         }

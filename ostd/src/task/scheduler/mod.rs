@@ -493,12 +493,57 @@ pub(crate) fn unpark_target(runnable: Arc<Task>) {
     }
 }
 
+///
+#[cfg(miri)]
+pub fn kernel_task_entry(_temp: usize) {
+    // See `switch_to_task` for why we need this.
+    crate::arch::irq::enable_local();
+
+    let current_task =
+        Task::current().expect("no current task, it should have current task in kernel task entry");
+
+    let task_func = unsafe { &mut current_task.func.get() };
+    let task_func = task_func
+        .take()
+        .expect("task function is `None` when trying to run");
+    task_func();
+
+    exit_current();
+}
+
+#[expect(missing_docs)]
+unsafe extern "Rust" {
+    pub fn miri_create_new_thread(
+        func: fn(usize),
+        arg: usize,
+        task: &Task,
+        stack_end: usize,
+        stack_size: usize,
+    );
+
+    pub fn miri_switch_to(task: &Task);
+
+    pub fn miri_load_cpu_local(addr: *const u8) -> *const u8;
+}
+
 /// Enqueues a newly built task.
 ///
 /// Note that the new task is not guaranteed to run at once.
 #[track_caller]
 pub(super) fn run_new_task(runnable: Arc<Task>) {
-    let preempt_cpu = scheduler_singleton().enqueue(runnable, EnqueueFlags::Spawn);
+    let preempt_cpu = scheduler_singleton().enqueue(runnable.clone(), EnqueueFlags::Spawn);
+
+    #[cfg(miri)]
+    unsafe {
+        miri_create_new_thread(
+            kernel_task_entry,
+            0,
+            &runnable,
+            runnable.kstack.end_vaddr(),
+            super::kernel_stack::KERNEL_STACK_SIZE,
+        );
+    }
+
     if let Some(preempt_cpu_id) = preempt_cpu {
         set_need_preempt(preempt_cpu_id);
     }

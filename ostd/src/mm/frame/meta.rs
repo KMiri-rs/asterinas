@@ -534,6 +534,17 @@ fn alloc_meta_frames(tot_nr_frames: usize) -> (usize, Paddr) {
     )
     .unwrap();
 
+    // SAFETY: Mark meta pages as Slab in miri.
+    #[cfg(miri)]
+    unsafe {
+        crate::arch::kern_miri_retype_pages(
+            paddr,
+            nr_meta_pages,
+            crate::arch::PageType::Slab,
+            size_of::<MetaSlot>(),
+        );
+    }
+
     let slots = paddr_to_vaddr(paddr) as *mut MetaSlot;
 
     // Initialize the metadata slots.

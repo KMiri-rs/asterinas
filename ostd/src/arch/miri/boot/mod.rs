@@ -55,7 +55,7 @@ fn parse_memory_regions() -> MemoryRegionArray {
     regions.into_non_overlapping()
 }
 
-use crate::boot::{EARLY_INFO, EarlyBootInfo, call_ostd_main};
+use crate::boot::{EARLY_INFO, EarlyBootInfo, start_kernel};
 
 /// The entry point of the Rust code portion of Asterinas.
 #[unsafe(no_mangle)]
@@ -69,5 +69,6 @@ pub fn miri_boot() {
         memory_regions: parse_memory_regions(),
     });
 
-    crate::boot::call_ostd_main();
+    // Safety: miri should support this.
+    unsafe { start_kernel() };
 }

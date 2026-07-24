@@ -5,6 +5,7 @@
 #![feature(allocator_api)]
 #![feature(btree_cursors)]
 #![feature(core_intrinsics)]
+#![feature(format_args_nl)]
 #![feature(linkage)]
 #![feature(min_specialization)]
 #![feature(negative_impls)]
@@ -35,7 +36,7 @@ macro_rules! miri_println {
     };
     ($($arg:tt)*) => {
         #[cfg(miri)]
-        $crate::arch::_miri_print(format_args_nl!($($arg)*));
+        $crate::arch::_miri_print(::core::format_args_nl!($($arg)*));
     };
 }
 

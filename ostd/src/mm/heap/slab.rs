@@ -138,6 +138,12 @@ impl<const SLOT_SIZE: usize> Slab<SLOT_SIZE> {
             return Err(AllocError);
         }
         debug_assert_eq!(slot.size(), SLOT_SIZE);
+        miri_println!(
+            "[ostd/src/mm/heap/slab.rs - dealloc] slot vaddr={:p} paddr={:#x} size={}",
+            slot.as_ptr(),
+            slot.paddr(),
+            slot.size()
+        );
         self.meta_mut().free_list.push(slot);
         self.meta_mut().nr_allocated -= 1;
 

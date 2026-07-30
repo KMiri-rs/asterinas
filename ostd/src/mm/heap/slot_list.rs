@@ -55,6 +55,15 @@ impl<const SLOT_SIZE: usize> SlabSlotList<SLOT_SIZE> {
         let original_head = self.head;
 
         debug_assert!(!slot_ptr.is_null());
+
+        // fix solution 1: expose provenance
+        // let slot_ptr = slot_ptr as usize as *mut u8;
+
+        // fix solution 2: refresh borrow stack from unique tag
+        let slot =
+            unsafe { core::slice::from_raw_parts_mut(slot_ptr as usize as *mut u8, slot_size) };
+        let slot_ptr = slot.as_mut_ptr();
+
         // SAFETY: A pointer to a slot must not be NULL;
         self.head = Some(unsafe { NonNull::new_unchecked(slot_ptr) });
         // Write the original head to the slot.

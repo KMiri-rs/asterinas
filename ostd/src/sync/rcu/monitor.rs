@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use alloc::collections::VecDeque;
-use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
 use crate::{
     cpu::{AtomicCpuSet, CpuId, CpuSet, PinCurrentCpu},
@@ -65,8 +65,8 @@ impl RcuMonitor {
         };
 
         // Invoke the callbacks to notify the completion of GP
-        for f in callbacks {
-            (f)();
+        for _f in callbacks {
+            // (f)();
         }
     }
 
@@ -74,35 +74,59 @@ impl RcuMonitor {
     where
         F: FnOnce() + Send + 'static,
     {
-        let mut state = self.state.disable_irq().lock();
+        let mut state = &mut *self.state.disable_irq().lock();
 
-        state.next_callbacks.push_back(Box::new(f));
+        static N: AtomicU32 = AtomicU32::new(0);
+        let id = N.fetch_add(1, Relaxed);
+        // if id > 32 {
+        //     return;
+        // }
+        let next_callbacks = &mut state.next_callbacks;
+        let len = next_callbacks.len();
+        let cap = next_callbacks.capacity();
+        let (ptr1, _ptr2) = next_callbacks.as_slices();
+        miri_println!("push_back: [before] id={id} len={len} cap={cap} ptr1={ptr1:p}");
+        if len == 104 {
+            println!("next_callbacks={:p}", next_callbacks);
+        }
+        if len == 65 {
+            println!("next_callbacks={:p}", next_callbacks);
+        }
+        next_callbacks.push_back(0);
+        let len = next_callbacks.len();
+        let cap = next_callbacks.capacity();
+        let (ptr1, _ptr2) = next_callbacks.as_slices();
+        miri_println!("push_back: [after ] id={id} len={len} cap={cap} ptr1={ptr1:p}");
 
         if !state.current_gp.is_complete() {
+            miri_println!("current_gp is not complete");
             return;
         }
 
-        let callbacks = core::mem::take(&mut state.next_callbacks);
+        let callbacks = core::mem::take(next_callbacks);
         state.current_gp.restart(callbacks);
         self.is_monitoring.store(true, Relaxed);
     }
 }
 
 struct State {
+    dummy: [u8; 10],
     current_gp: GracePeriod,
     next_callbacks: Callbacks,
 }
 
 impl State {
     fn new() -> Self {
+        miri_println!("State.size={}", size_of::<Self>());
         Self {
+            dummy: [0; 10],
             current_gp: GracePeriod::new(),
             next_callbacks: VecDeque::new(),
         }
     }
 }
 
-type Callbacks = VecDeque<Box<dyn FnOnce() + Send + 'static>>;
+type Callbacks = VecDeque<u8>;
 
 struct GracePeriod {
     callbacks: Callbacks,

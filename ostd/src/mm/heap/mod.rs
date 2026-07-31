@@ -121,7 +121,7 @@ unsafe impl GlobalAlloc for AllocDispatch {
             );
         }
 
-        slot.as_ptr()
+        slot.as_ptr() as usize as *mut u8
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {

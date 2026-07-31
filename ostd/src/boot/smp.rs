@@ -9,9 +9,8 @@ use spin::Once;
 use crate::{
     arch::irq::HwCpuId,
     mm::{
-        FrameAllocOptions, HasPaddrRange, PAGE_SIZE,
-        frame::{Segment, meta::KernelMeta},
-        paddr_to_vaddr,
+        frame::{meta::KernelMeta, Segment},
+        paddr_to_vaddr, FrameAllocOptions, HasPaddrRange, PAGE_SIZE,
     },
     sync::SpinLock,
     task::Task,
@@ -202,12 +201,7 @@ fn report_online_and_hw_cpu_id(cpu_id: u32) {
     // context, where preemption won't occur.
     let hw_cpu_id = HwCpuId::read_current(&crate::task::disable_preempt());
 
-    let mut hw_cpu_id_map = HW_CPU_ID_MAP.lock();
-    let old_val = hw_cpu_id_map.insert(cpu_id, hw_cpu_id);
-    let (k, v) = hw_cpu_id_map.first_key_value().unwrap();
-    miri_println!(
-        "[report_online_and_hw_cpu_id] HW_CPU_ID_MAP.insert({hw_cpu_id:?}) &k={k:p} &v={v:p}"
-    );
+    let old_val = HW_CPU_ID_MAP.lock().insert(cpu_id, hw_cpu_id);
     assert!(old_val.is_none());
 }
 
@@ -237,10 +231,7 @@ pub(crate) fn construct_hw_cpu_id_mapping() -> Box<[HwCpuId]> {
         .cloned()
         .collect::<Vec<_>>()
         .into_boxed_slice();
-    let (k, v) = hw_cpu_id_map.first_key_value().unwrap();
-    miri_println!("[construct_hw_cpu_id_mapping - before clear] &k={k:p} &v={v:p}");
-    // hw_cpu_id_map.clear();
-    core::mem::take(&mut *hw_cpu_id_map);
+    hw_cpu_id_map.clear();
 
     result
 }

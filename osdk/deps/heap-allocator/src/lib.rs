@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
 #![feature(allocator_api)]
-#![feature(format_args_nl)]
 #![no_std]
 #![deny(unsafe_code)]
 

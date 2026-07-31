@@ -303,12 +303,6 @@ impl GlobalHeapAllocator for HeapAllocator {
     }
 
     fn dealloc(&self, slot: HeapSlot) -> Result<(), AllocError> {
-        ostd::miri_println!(
-            "[heap-allocator - dealloc] slot vaddr={:p} paddr={:#x} size={}",
-            slot.as_ptr(),
-            slot.paddr(),
-            slot.size()
-        );
         let Some(class) = CommonSizeClass::from_size(slot.size()) else {
             slot.dealloc_large();
             return Ok(());

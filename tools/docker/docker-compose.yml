@@ -1,0 +1,14 @@
+services:
+  asterinas:
+    # 使用变量插值
+    image: ${IMAGE_NAME}
+    container_name: asterinas_dev  # 固定名称，方便下次直接 start
+    privileged: true
+    network_mode: host
+    volumes:
+      - ${ASTER_SRC_DIR}:/asterinas
+    # 模拟 -it 参数，保证容器不自动退出且可以交互
+    stdin_open: true 
+    tty: true
+    # 指定工作目录（可选）
+    working_dir: /asterinas

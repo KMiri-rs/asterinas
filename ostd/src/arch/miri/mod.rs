@@ -3,7 +3,7 @@
 //! Platform-specific code for the RISC-V platform.
 
 pub mod boot;
-pub(crate) mod cpu;
+pub mod cpu;
 pub mod device;
 pub mod io;
 pub mod iommu;

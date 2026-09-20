@@ -21,7 +21,7 @@ use crate::{
     irq::call_irq_callback_functions,
     mm::Vaddr,
     ostd_pod::{FromZeros, IntoBytes},
-    user::{ReturnReason, UserContextApi, UserContextApiInternal},
+    user::{ReturnReason, UserContextApi, UserContextApiInternal, UserModeHooks},
 };
 
 /// Userspace CPU context, including general-purpose registers and exception information.
@@ -248,10 +248,7 @@ impl UserContext {
 }
 
 impl UserContextApiInternal for UserContext {
-    fn execute<F>(&mut self, mut has_kernel_event: F) -> ReturnReason
-    where
-        F: FnMut() -> bool,
-    {
+    fn execute<F: UserModeHooks>(&mut self, hooks: &F) -> ReturnReason {
         // set interrupt flag so that in user mode it can receive external interrupts
         // set ID flag which means cpu support CPUID instruction
         self.user_context.general.rflags |= (RFlags::INTERRUPT_FLAG | RFlags::ID).bits() as usize;
@@ -292,7 +289,7 @@ impl UserContextApiInternal for UserContext {
                 }
             }
 
-            if has_kernel_event() {
+            if hooks.has_kernel_event() {
                 break ReturnReason::KernelEvent;
             }
         }
@@ -404,14 +401,6 @@ bitflags! {
 }
 
 impl UserContextApi for UserContext {
-    fn trap_number(&self) -> usize {
-        self.user_context.trap_num
-    }
-
-    fn trap_error_code(&self) -> usize {
-        self.user_context.error_code
-    }
-
     fn set_instruction_pointer(&mut self, ip: usize) {
         self.set_rip(ip);
     }

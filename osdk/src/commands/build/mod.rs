@@ -175,7 +175,7 @@ pub fn do_cached_build(
         BootMethod::VmmDirect => {
             let aster_bin = if config.target_arch == Arch::Aarch64 {
                 make_aarch64_image(&osdk_output_directory, &boot_elf)
-            } else if grub.boot_protocol == BootProtocol::Linux {
+            } else if action_config.grub.boot_protocol == BootProtocol::Linux {
                 make_install_bzimage(
                     &osdk_output_directory,
                     &osdk_output_directory,

@@ -2,7 +2,6 @@
 
 use core::ops::Range;
 
-use cfg_if::cfg_if;
 use x86_64::{VirtAddr, instructions::tlb, structures::paging::PhysFrame};
 
 #[path = "../../x86/mm/pat.rs"]
@@ -14,9 +13,7 @@ use super::kern_miri_copy;
 use crate::mm::{
     PAGE_SIZE, Paddr, PagingConstsTrait, PagingLevel, PodOnce, Vaddr,
     dma::DmaDirection,
-    page_prop::{
-        CachePolicy, PageFlags, PageProperty, PageTableFlags, PrivilegedPageFlags as PrivFlags,
-    },
+    page_prop::{PageFlags, PageProperty, PageTableFlags, PrivilegedPageFlags as PrivFlags},
     page_table::{PteScalar, PteTrait},
 };
 
@@ -133,7 +130,7 @@ unsafe extern "Rust" {
 ///
 /// Changing the root-level page table is unsafe, because it's possible to violate memory safety by
 /// changing the page mapping.
-pub(crate) unsafe fn activate_page_table(root_paddr: Paddr, _root_pt_cache: CachePolicy) {
+pub(crate) unsafe fn activate_page_table(root_paddr: Paddr) {
     kern_miri_set_root_page_table(root_paddr);
 }
 
@@ -153,12 +150,13 @@ macro_rules! parse_flags {
 }
 
 impl PageTableEntry {
-    cfg_if! {
-        if #[cfg(feature = "cvm_guest")] {
+    cfg_select! {
+        feature = "cvm_guest" => {
             const PHYS_ADDR_MASK_LVL1: usize = 0x7_ffff_ffff_f000;
             const PHYS_ADDR_MASK_LVL2: usize = 0x7_ffff_ffe0_0000;
             const PHYS_ADDR_MASK_LVL3: usize = 0x7_ffff_c000_0000;
-        } else {
+        }
+        _ => {
             const PHYS_ADDR_MASK_LVL1: usize = 0xf_ffff_ffff_f000;
             const PHYS_ADDR_MASK_LVL2: usize = 0xf_ffff_ffe0_0000;
             const PHYS_ADDR_MASK_LVL3: usize = 0xf_ffff_c000_0000;

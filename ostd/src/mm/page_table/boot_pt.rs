@@ -79,9 +79,19 @@ pub(crate) unsafe fn dismiss() {
             boot_pt.root_pt,
             PagingConsts::NR_LEVELS,
             &mut |pte, pa, _, flags| {
+                // SAFETY: this callback is called only once even though the walk traverses all ptes.
+                #[cfg(miri)]
+                unsafe {
+                    crate::arch::kern_miri_zero(pa, 1);
+                }
                 if !flags.contains(PTE_POINTS_TO_FIRMWARE_PT) {
                     // SAFETY: The pointed frame is allocated and forgotten with `into_raw`.
-                    drop(unsafe { Frame::<EarlyAllocatedFrameMeta>::from_raw(pa) })
+                    drop(unsafe { Frame::<EarlyAllocatedFrameMeta>::from_raw(pa) });
+                    // SAFETY: this callback is called only once even though the walk traverses all ptes.
+                    #[cfg(miri)]
+                    unsafe {
+                        crate::arch::kern_miri_dealloc_pages(pa, 1);
+                    }
                 }
                 // Firmware provided page tables may be a DAG instead of a tree.
                 // Clear it to avoid double-free when we meet it the second time.
@@ -168,7 +178,7 @@ impl<E: PteTrait, C: PagingConstsTrait> BootPageTable<E, C> {
         while level > 1 {
             let index = pte_index::<C>(from, level);
             // SAFETY: The result pointer is within the PT frame.
-            let pte_ptr = unsafe { (paddr_to_vaddr(pt) as *mut E).add(index) };
+            let pte_ptr = (paddr_to_vaddr(pt) + index * size_of::<E>()) as *mut E;
             // SAFETY: The pointer to the entry is valid to read.
             let pte = unsafe { pte_ptr.read() };
             match pte.to_repr(level) {
@@ -190,7 +200,7 @@ impl<E: PteTrait, C: PagingConstsTrait> BootPageTable<E, C> {
         // Map the page in the last level page table.
         let index = pte_index::<C>(from, 1);
         // SAFETY: The result pointer is within the PT frame.
-        let pte_ptr = unsafe { (paddr_to_vaddr(pt) as *mut E).add(index) };
+        let pte_ptr = unsafe { (paddr_to_vaddr(pt) + index * size_of::<E>()) as *mut E };
         // SAFETY: The pointer to the entry is valid to read.
         let pte = unsafe { pte_ptr.read() };
         if matches!(pte.to_repr(1), PteScalar::Mapped(_, _)) {
@@ -287,7 +297,18 @@ impl<E: PteTrait, C: PagingConstsTrait> BootPageTable<E, C> {
         // Zero it out.
         let vaddr = paddr_to_vaddr(frame_paddr) as *mut u8;
         // SAFETY: The allocated frame is valid to write.
-        unsafe { core::ptr::write_bytes(vaddr, 0, PAGE_SIZE) };
+        #[cfg(not(miri))]
+        unsafe {
+            core::ptr::write_bytes(vaddr, 0, PAGE_SIZE)
+        };
+
+        // SAFETY: kmiri allocates and retypes the page.
+        #[cfg(miri)]
+        unsafe {
+            use crate::arch::{PageType, kern_miri_retype_pages, kern_miri_zero};
+            kern_miri_zero(frame_paddr, 1);
+            kern_miri_retype_pages(frame_paddr, 1, PageType::PageTable, C::PTE_SIZE);
+        }
 
         (
             E::from_repr(
@@ -317,10 +338,11 @@ fn dfs_walk_on_leave<E: PteTrait, C: PagingConstsTrait>(
     op: &mut impl FnMut(&mut E, Paddr, PagingLevel, PageTableFlags),
 ) {
     if level >= 2 {
-        let pt_vaddr = paddr_to_vaddr(pt) as *mut E;
+        let pt_vaddr = paddr_to_vaddr(pt);
+        let size = size_of::<E>();
         for offset in 0..nr_subpage_per_huge::<C>() {
             // SAFETY: The result pointer is within the PT frame.
-            let pte_ptr = unsafe { pt_vaddr.add(offset) };
+            let pte_ptr = (pt_vaddr + offset * size) as *mut E;
             // SAFETY: The pointer to the entry is valid to read.
             let mut pte = unsafe { pte_ptr.read() };
 

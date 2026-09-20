@@ -549,13 +549,24 @@ fn alloc_meta_frames(tot_nr_frames: usize) -> (usize, Paddr) {
     )
     .unwrap();
 
-    let slots = paddr_to_vaddr(paddr) as *mut MetaSlot;
+    // SAFETY: Mark meta pages as Slab in miri.
+    #[cfg(miri)]
+    unsafe {
+        crate::arch::kern_miri_retype_pages(
+            paddr,
+            nr_meta_pages,
+            crate::arch::PageType::Slab,
+            size_of::<MetaSlot>(),
+        );
+    }
+
+    let slots = paddr_to_vaddr(paddr);
 
     // Initialize the metadata slots.
     for i in 0..tot_nr_frames {
+        let slot = (slots + i * size_of::<MetaSlot>()) as *mut MetaSlot;
         // SAFETY: The memory is successfully allocated with `tot_nr_frames`
         // slots so the index must be within the range.
-        let slot = unsafe { slots.add(i) };
         // SAFETY: The memory is just allocated so we have exclusive access and
         // it's valid for writing.
         unsafe {

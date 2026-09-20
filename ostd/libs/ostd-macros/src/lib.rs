@@ -130,6 +130,41 @@ fn ostd_main_body(main_fn_name: &Ident) -> proc_macro2::TokenStream {
     }
 }
 
+/// A macro attribute for the kernel entry point of unit test with kmiri.
+#[proc_macro_attribute]
+pub fn miri_main(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let main_fn = parse_macro_input!(item as ItemFn);
+    let main_fn_name = &main_fn.sig.ident;
+
+    quote!(
+        #[cfg(miri)]
+        #[unsafe(no_mangle)]
+        extern "Rust" fn __ostd_main() {
+            #main_fn_name();
+
+            let task0 = move || {
+                ostd::miri_println!("Hello from task0!");
+            };
+
+            let task0 = alloc::sync::Arc::new(
+                ostd::task::TaskOptions::new(task0)
+                    .data(())
+                    .build()
+                    .unwrap(),
+            );
+
+            task0.run();
+            ostd::task::Task::yield_now();
+
+            ostd::miri_println!("__ostd_main finished running");
+        }
+
+        #[cfg(miri)]
+        #main_fn
+    )
+    .into()
+}
+
 /// A macro attribute for the global frame allocator.
 ///
 /// The attributed static variable will be used to provide frame allocation

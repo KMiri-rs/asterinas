@@ -79,6 +79,7 @@ impl Task {
     /// It returns `None` if the function is called in the bootstrap context.
     pub fn current() -> Option<CurrentTask> {
         let current_task = current_task()?;
+        miri_println!("current_task={current_task:p}");
 
         // SAFETY: `current_task` is the current task.
         Some(unsafe { CurrentTask::new(current_task) })
@@ -213,6 +214,7 @@ impl TaskOptions {
         let kstack = KernelStack::new_with_guard_page()?;
 
         let mut ctx = TaskContext::new();
+        #[cfg(not(miri))]
         ctx.set_instruction_pointer(
             crate::arch::task::kernel_task_entry_wrapper as *const () as usize,
         );

@@ -10,11 +10,17 @@ pub mod uart_ns16650a;
 
 /// Prints formatted arguments to the console.
 pub fn early_print(args: Arguments) {
+    #[cfg(miri)]
+    {
+        miri_println!("{args}");
+        return;
+    }
+
     let Some(serial) = SERIAL_PORT.get() else {
         return;
     };
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     crate::arch::if_tdx_enabled!({
         // Hold the lock to prevent the logs from interleaving.
         let _guard = serial.lock();

@@ -8,7 +8,8 @@ use crate::{
     arch::Arch,
     commands::{
         execute_build_command, execute_debug_command, execute_forwarded_command,
-        execute_new_command, execute_profile_command, execute_run_command, execute_test_command,
+        execute_miri_command, execute_miri_debugger_command, execute_new_command,
+        execute_profile_command, execute_run_command, execute_test_command,
     },
     config::{
         Config,
@@ -65,6 +66,14 @@ pub fn main() {
         }
         OsdkSubcommand::Doc(args) => execute_forwarded_command("doc", &args.args, false),
         OsdkSubcommand::Udeps(args) => execute_forwarded_command("udeps", &args.args, true),
+        OsdkSubcommand::Miri(test_args) => {
+            execute_miri_command(&load_config(&test_args.common_args), test_args)
+        }
+        OsdkSubcommand::MiriDebugger(test_args) => {
+            let mut config = load_config(&test_args.common_args);
+            config.miri_debugger = true;
+            execute_miri_debugger_command(&config, test_args)
+        }
     }
 }
 
@@ -104,6 +113,10 @@ pub enum OsdkSubcommand {
     Doc(ForwardedArguments),
     #[command(about = "Check unused dependencies")]
     Udeps(ForwardedArguments),
+    #[command(about = "Use miri to run ostd-based kernel")]
+    Miri(TestArgs),
+    #[command(about = "Launch miri debugger")]
+    MiriDebugger(TestArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -341,7 +354,7 @@ pub struct TestArgs {
         name = "TESTNAME",
         help = "Only run tests containing this string in their names"
     )]
-    pub test_name: Option<String>,
+    pub test_name: Vec<String>,
     #[command(flatten)]
     pub common_args: CommonArgs,
 }

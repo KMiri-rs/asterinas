@@ -134,8 +134,7 @@ impl IpiSender {
                 continue;
             }
             let hw_cpu_id = self.hw_cpu_ids[cpu_id.as_usize()];
-            crate::arch::irq::send_ipi(hw_cpu_id, &irq_guard as _)
-                .expect("failed to send inter-processor interrupt");
+            crate::arch::irq::send_ipi(hw_cpu_id, &irq_guard as _);
         }
         if call_on_self {
             // Execute the function synchronously.

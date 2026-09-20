@@ -12,13 +12,9 @@ use aster_input::{
     event_type_codes::{KeyCode, KeyStatus, SynEvent},
     input_dev::{InputCapability, InputDevice, InputEvent, InputId, RegisteredInputDevice},
 };
-use ostd::{
-    arch::{
-        irq::{IRQ_CHIP, MappedIrqLine},
-        trap::TrapFrame,
-    },
-    irq::IrqLine,
-};
+#[cfg(not(miri))]
+use ostd::arch::irq::{IRQ_CHIP, MappedIrqLine};
+use ostd::{arch::trap::TrapFrame, irq::IrqLine};
 use spin::Once;
 
 use crate::{
@@ -27,6 +23,7 @@ use crate::{
 };
 
 /// IRQ line for i8042 keyboard.
+#[cfg(not(miri))]
 static IRQ_LINE: Once<MappedIrqLine> = Once::new();
 
 /// Registered device instance for event submission.

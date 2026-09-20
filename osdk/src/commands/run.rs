@@ -39,7 +39,8 @@ pub fn execute_run_command(config: &Config, gdb_server_args: Option<&str>) {
         &config,
         ActionChoice::Run,
         &[],
-    );
+    )
+    .unwrap();
 
     bundle.run(&config, ActionChoice::Run);
 }

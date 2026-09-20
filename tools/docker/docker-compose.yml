@@ -1,0 +1,19 @@
+services:
+  asterinas:
+    image: asterinas/dev:0.18.1-20260918
+    container_name: asterinas_dev
+    privileged: true
+    network_mode: host
+    working_dir: /KMiri
+    command: sleep infinity
+    volumes:
+      - /home/zjp/KMiri:/KMiri
+      - /home/zjp/.secrets/claude_settings.json:/root/.claude/settings.json
+      - /home/zjp/.gitconfig:/root/.gitconfig
+    env_file:
+      - /home/zjp/.secrets/agents.env
+    environment:
+      # inherit host environment variables
+      - http_proxy
+      - https_proxy
+      - no_proxy=ubuntu.com,archive.ubuntu.com,security.ubuntu.com,localhost,127.0.0.1

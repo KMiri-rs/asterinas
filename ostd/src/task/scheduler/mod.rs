@@ -493,12 +493,69 @@ pub(crate) fn unpark_target(runnable: Arc<Task>) {
     }
 }
 
+///
+#[cfg(miri)]
+pub fn kernel_task_entry(_temp: usize) {
+    // See `switch_to_task` for why we need this.
+    crate::arch::irq::enable_local();
+    miri_println!("[kernel_task_entry]");
+
+    let current_task =
+        Task::current().expect("no current task, it should have current task in kernel task entry");
+
+    let task_func = unsafe { &mut current_task.func.get() };
+    let task_func = task_func
+        .take()
+        .expect("task function is `None` when trying to run");
+    task_func();
+
+    #[cfg(not(miri))]
+    exit_current();
+    #[cfg(miri)]
+    kmiri_exit_current();
+}
+
+#[expect(missing_docs)]
+unsafe extern "Rust" {
+    // FIXME: remove the `arg` input and make func take nothing
+    pub fn miri_create_new_thread(
+        func: fn(usize),
+        arg: usize,
+        task: &Task,
+        stack_end: usize,
+        stack_size: usize,
+    );
+
+    pub fn miri_switch_to(task: &Task);
+
+    pub fn miri_load_cpu_local(addr: *const u8) -> *const u8;
+}
+
 /// Enqueues a newly built task.
 ///
 /// Note that the new task is not guaranteed to run at once.
 #[track_caller]
 pub(super) fn run_new_task(runnable: Arc<Task>) {
-    let preempt_cpu = scheduler_singleton().enqueue(runnable, EnqueueFlags::Spawn);
+    let preempt_cpu = scheduler_singleton().enqueue(runnable.clone(), EnqueueFlags::Spawn);
+
+    // FIXME: need to handle multi-cpu switch/preempt.
+    let stack_end = runnable.kstack.end_vaddr();
+    let stack_size = super::kernel_stack::KERNEL_STACK_SIZE;
+    miri_println!(
+        "unnable.kstack.end_vaddr=0x{stack_end:x} stack_size=0x{stack_size:x} stack_range=0x{:x}..0x{stack_end:x}",
+        stack_end - stack_size,
+    );
+    #[cfg(miri)]
+    unsafe {
+        miri_create_new_thread(
+            kernel_task_entry,
+            0,
+            &runnable,
+            runnable.kstack.end_vaddr(),
+            super::kernel_stack::KERNEL_STACK_SIZE,
+        );
+    }
+
     if let Some(preempt_cpu_id) = preempt_cpu {
         set_need_preempt(preempt_cpu_id);
     }
@@ -524,6 +581,8 @@ fn set_need_preempt(cpu_id: CpuId) {
 #[track_caller]
 pub(super) fn exit_current() -> ! {
     let mut is_first_try = true;
+    // Retry 100 times and do nothing.
+    let mut retry = 100;
 
     reschedule(|local_rq: &mut dyn LocalRunQueue| {
         let next_task_opt = if is_first_try {
@@ -536,13 +595,47 @@ pub(super) fn exit_current() -> ! {
         };
 
         if let Some(next_task) = next_task_opt {
-            ReschedAction::SwitchTo(next_task.clone())
+            return ReschedAction::SwitchTo(next_task.clone());
+        }
+        retry -= 1;
+        if retry == 0 {
+            ReschedAction::DoNothing
         } else {
             ReschedAction::Retry
         }
     });
 
     unreachable!()
+}
+
+/// This should align with `exit_current`, but should normally return,
+/// because kmiri handles the task/thread switch.
+#[cfg(miri)]
+pub(super) fn kmiri_exit_current() {
+    let mut is_first_try = true;
+    // Retry 100 times and do nothing.
+    let mut retry = 100;
+
+    reschedule(|local_rq: &mut dyn LocalRunQueue| {
+        let next_task_opt = if is_first_try {
+            is_first_try = false;
+            let should_pick_next = local_rq.update_current(UpdateFlags::Exit);
+            let _current = local_rq.dequeue_current();
+            should_pick_next.then(|| local_rq.pick_next())
+        } else {
+            local_rq.try_pick_next()
+        };
+
+        if let Some(next_task) = next_task_opt {
+            return ReschedAction::SwitchTo(next_task.clone());
+        }
+        retry -= 1;
+        if retry == 0 {
+            ReschedAction::DoNothing
+        } else {
+            ReschedAction::Retry
+        }
+    });
 }
 
 /// Yields execution.

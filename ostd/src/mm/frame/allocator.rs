@@ -58,10 +58,22 @@ impl FrameAllocOptions {
             .map(|paddr| Frame::from_unused(paddr, metadata).unwrap())
             .ok_or(Error::NoMemory)?;
 
+        let paddr = frame.paddr();
+        #[cfg(miri)]
+        unsafe {
+            crate::arch::kern_miri_alloc_pages(paddr, 1);
+        }
         if self.zeroed {
-            let addr = paddr_to_vaddr(frame.paddr()) as *mut u8;
             // SAFETY: The newly allocated frame is guaranteed to be valid.
-            unsafe { core::ptr::write_bytes(addr, 0, PAGE_SIZE) }
+            #[cfg(not(miri))]
+            unsafe {
+                let vaddr = paddr_to_vaddr(paddr) as *mut u8;
+                core::ptr::write_bytes(vaddr, 0, PAGE_SIZE)
+            };
+            #[cfg(miri)]
+            unsafe {
+                crate::arch::kern_miri_zero(paddr, 1);
+            }
         }
 
         Ok(frame)
@@ -98,7 +110,12 @@ impl FrameAllocOptions {
         if self.zeroed {
             let addr = paddr_to_vaddr(segment.paddr()) as *mut u8;
             // SAFETY: The newly allocated segment is guaranteed to be valid.
-            unsafe { core::ptr::write_bytes(addr, 0, nframes * PAGE_SIZE) }
+            unsafe {
+                #[cfg(not(miri))]
+                core::ptr::write_bytes(addr, 0, nframes * PAGE_SIZE);
+                #[cfg(miri)]
+                crate::arch::kern_miri_zero(segment.paddr(), nframes);
+            }
         }
 
         Ok(segment)
@@ -307,6 +324,13 @@ impl EarlyFrameAllocator {
                 && allocated_end <= end
             {
                 *tail = allocated_end;
+
+                // SAFETY: allocate a page in miri with right start and size.
+                #[cfg(miri)]
+                unsafe {
+                    crate::arch::kern_miri_alloc_pages(allocated, size / PAGE_SIZE)
+                };
+
                 return Some(allocated);
             }
         }

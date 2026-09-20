@@ -6,6 +6,7 @@
 
 #![no_std]
 #![forbid(unsafe_code)]
+#![cfg_attr(miri, feature(core_intrinsics), allow(internal_features, unused))]
 
 extern crate alloc;
 

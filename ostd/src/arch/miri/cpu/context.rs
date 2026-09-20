@@ -20,6 +20,7 @@ use crate::{
     cpu::PrivilegeLevel,
     irq::call_irq_callback_functions,
     mm::Vaddr,
+    ostd_pod::{FromZeros, IntoBytes},
     user::{ReturnReason, UserContextApi, UserContextApiInternal},
 };
 
@@ -529,7 +530,7 @@ impl FpuContext {
 
     /// Returns the FPU context as a mutable byte slice.
     pub fn as_bytes_mut(&mut self) -> &mut [u8] {
-        &mut self.xsave_area.as_bytes_mut()[..self.area_size]
+        &mut self.xsave_area.as_mut_bytes()[..self.area_size]
     }
 }
 

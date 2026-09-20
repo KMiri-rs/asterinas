@@ -26,7 +26,7 @@ use scheme::{
 use crate::{
     arch::{Arch, get_default_arch},
     cli::CommonArgs,
-    config::unix_args::apply_kv_array,
+    config::{scheme::ActionChoice, unix_args::apply_kv_array},
     error::Errno,
     error_msg,
     util::new_command_checked_exists,
@@ -40,6 +40,16 @@ pub struct Config {
     pub build: Build,
     pub run: Action,
     pub test: Action,
+    pub miri_debugger: bool,
+}
+
+impl Config {
+    pub fn action(&self, action: ActionChoice) -> &Action {
+        match action {
+            ActionChoice::Run => &self.run,
+            ActionChoice::Test | ActionChoice::Miri | ActionChoice::MiriDebugger => &self.test,
+        }
+    }
 }
 
 fn apply_args_before_finalize(
@@ -235,6 +245,7 @@ impl Config {
             build,
             run,
             test,
+            miri_debugger: false,
         }
     }
 }

@@ -12,8 +12,12 @@ mod test;
 mod util;
 
 pub use self::{
-    build::execute_build_command, debug::execute_debug_command, miri::execute_miri_command,
-    new::execute_new_command, profile::execute_profile_command, run::execute_run_command,
+    build::execute_build_command,
+    debug::execute_debug_command,
+    miri::{execute_miri_command, execute_miri_debugger_command},
+    new::execute_new_command,
+    profile::execute_profile_command,
+    run::execute_run_command,
     test::execute_test_command,
 };
 

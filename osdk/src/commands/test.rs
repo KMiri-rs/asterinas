@@ -114,7 +114,8 @@ pub static KTEST_CRATE_WHITELIST: Option<&[&str]> = Some(&{:#?});
         config,
         ActionChoice::Test,
         &["--cfg ktest", "-C panic=unwind"],
-    );
+    )
+    .unwrap();
     drop(dir_guard);
 
     let exit_status = bundle.run_qemu_and_wait(config, ActionChoice::Test);

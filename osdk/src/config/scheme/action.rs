@@ -11,6 +11,7 @@ pub enum ActionChoice {
     Run,
     Test,
     Miri,
+    MiriDebugger,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

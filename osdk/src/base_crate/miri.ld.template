@@ -139,5 +139,31 @@ SECTIONS
     . = DATA_SEGMENT_END(.);
 
     __kernel_end = .;
+
+    # symbols of kmiri shims
+    .kmiri : {
+        kern_miri_alloc_pages = .;
+        kern_miri_set_root_page_table = .;
+        kern_miri_get_root_page_table = .;
+        kern_miri_alloc_pages = .;
+        kern_miri_dealloc_pages = .;
+        kern_miri_retype_pages = .;
+        kern_miri_zero = .;
+        kern_miri_read_u8_untyped = .;
+        kern_miri_write_u8_untyped = .;
+        kern_miri_copy_untyped = .;
+        kern_miri_log = .;
+        kern_miri_copy = .;
+        kern_miri_get_cpu_local_va = .;
+        kern_miri_init_ap = .;
+        kern_miri_record_time = .;
+        kern_miri_get_cpu_local_base = .;
+        kern_miri_set_cpu_local_base = .;
+        miri_spin_loop = .;
+        miri_write_to_stdout = .;
+        miri_create_new_thread = .;
+        miri_switch_to = .;
+        miri_promise_symbolic_alignment = .;
+    }
 }
 

@@ -8,16 +8,63 @@ use crate::{
     util::{get_current_crates, get_target_directory},
 };
 use std::fs;
+use std::path::PathBuf;
 
 pub fn execute_miri_command(config: &Config, args: &TestArgs) {
     let crates = get_current_crates();
     for krate in crates {
         std::env::set_current_dir(&krate.path).unwrap();
-        miri_current_crate(config, args);
+        miri_current_crate(config, args, ActionChoice::Miri);
     }
 }
 
-pub fn miri_current_crate(config: &Config, args: &TestArgs) {
+pub fn execute_miri_debugger_command(config: &Config, args: &TestArgs) {
+    let crates = get_current_crates();
+    for krate in crates {
+        std::env::set_current_dir(&krate.path).unwrap();
+        _ = fs::remove_dir_all("target");
+        let paths = miri_current_crate(config, args, ActionChoice::MiriDebugger);
+        paths.copy_analysis_json();
+        paths.do_cached_build(config, ActionChoice::Miri);
+    }
+}
+
+struct CrateDirectoryPaths {
+    default_bundle_directory: PathBuf,
+    osdk_output_directory: PathBuf,
+    cargo_target_directory: PathBuf,
+    target_crate_dir: PathBuf,
+}
+
+impl CrateDirectoryPaths {
+    fn do_cached_build(&self, config: &Config, action: ActionChoice) {
+        std::env::set_current_dir(&self.target_crate_dir).unwrap();
+        do_cached_build(
+            &self.default_bundle_directory,
+            &self.osdk_output_directory,
+            &self.cargo_target_directory,
+            config,
+            action,
+            &["--cfg=ktest", "--cfg=miri"],
+        );
+    }
+
+    fn copy_analysis_json(&self) {
+        let src = self.target_crate_dir.join("target").join("analysis.json");
+        assert!(src.exists());
+        // let dest = self.target_crate_dir.join("analysis.json");
+        let dest = self.cargo_target_directory.join("analysis.json");
+        fs::copy(src, dest).unwrap();
+    }
+}
+
+/// Miri or KMiriHelper doesn't generate full binary artifacts.
+/// The returned path refers to the base crate, usually being `$proj/target/osdk-miri/${proj}-base`.
+fn miri_current_crate(
+    config: &Config,
+    args: &TestArgs,
+    action: ActionChoice,
+) -> CrateDirectoryPaths {
     let current_crate = &get_current_crates()[0];
     let cargo_target_directory = get_target_directory();
     let osdk_output_directory = cargo_target_directory.join(DEFAULT_MIRI_TARGET_RELPATH);
@@ -75,13 +122,13 @@ pub static KTEST_CRATE_WHITELIST: Option<&[&str]> = Some(&{:#?});
     // Build the kernel with the given base crate
     let target_name = get_current_crates()[0].name.clone();
     let default_bundle_directory = osdk_output_directory.join(target_name);
-    std::env::set_current_dir(&target_crate_dir).unwrap();
-    let _bundle = do_cached_build(
+
+    let paths = CrateDirectoryPaths {
         default_bundle_directory,
-        &osdk_output_directory,
-        &cargo_target_directory,
-        config,
-        ActionChoice::Miri,
-        &["--cfg=ktest", "--cfg=miri"],
-    );
+        osdk_output_directory,
+        cargo_target_directory,
+        target_crate_dir,
+    };
+    paths.do_cached_build(config, action);
+    paths
 }

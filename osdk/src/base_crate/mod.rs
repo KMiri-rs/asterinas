@@ -17,6 +17,7 @@ const LINKER_SCRIPTS: &[(&str, &str)] = &[
     ("riscv64.ld", include_str!("riscv64.ld.template")),
     ("loongarch64.ld", include_str!("loongarch64.ld.template")),
     ("aarch64.ld", include_str!("aarch64.ld.template")),
+    ("miri.ld", include_str!("miri.ld.template")),
 ];
 
 /// Compares two files byte-by-byte to check if they are identical.
@@ -73,6 +74,8 @@ pub enum BaseCrateType {
     Run,
     /// The base crate is for testing the target crate.
     Test,
+    /// The base crate is for running the target crate with miri.
+    Miri,
     /// The base crate is for other actions using Cargo.
     #[expect(unused)]
     Other,
@@ -97,6 +100,7 @@ pub fn new_base_crate(
             + match base_type {
                 BaseCrateType::Run => "-run-base",
                 BaseCrateType::Test => "-test-base",
+                BaseCrateType::Miri => "-miri-base",
                 BaseCrateType::Other => "-base",
             })
         .to_string(),

@@ -95,7 +95,7 @@ impl<SecuritySensitivity> IoMem<SecuritySensitivity> {
         let frames_range = first_page_start..last_page_end;
         let area_size = frames_range.len();
 
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(target_arch = "x86_64", not(miri)))]
         let priv_flags = if_tdx_enabled!({
             assert!(
                 first_page_start == range.start && last_page_end == range.end,
@@ -117,7 +117,7 @@ impl<SecuritySensitivity> IoMem<SecuritySensitivity> {
         } else {
             PrivilegedPageFlags::empty()
         });
-        #[cfg(not(target_arch = "x86_64"))]
+        #[cfg(any(not(target_arch = "x86_64"), miri))]
         let priv_flags = PrivilegedPageFlags::empty();
 
         let prop = PageProperty {

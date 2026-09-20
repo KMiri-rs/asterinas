@@ -162,7 +162,13 @@ unsafe impl Memcpy<Infallible> for Infallible {
         // <https://github.com/asterinas/asterinas/pull/1001#discussion_r1667317406>.
 
         // SAFETY: The safety is upheld by the caller.
-        unsafe { core::intrinsics::volatile_copy_memory(dst, src, len) };
+        #[cfg(not(miri))]
+        unsafe {
+            core::intrinsics::volatile_copy_memory(dst, src, len)
+        };
+        // SAFETY: A magic kmiri intrinsic copy.
+        #[cfg(miri)]
+        crate::arch::kern_miri_copy(dst as usize, src as usize, len);
     }
 }
 

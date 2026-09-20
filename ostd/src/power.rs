@@ -67,10 +67,23 @@ pub fn inject_poweroff_handler(handler: fn(ExitCode)) {
     POWEROFF_HANDLER.call_once(|| handler);
 }
 
+#[cfg(miri)]
+pub fn poweroff(code: ExitCode) -> ! {
+    crate::miri_println!("power off: {code:?}");
+    core::intrinsics::abort()
+}
+
+#[cfg(miri)]
+fn machine_halt() -> ! {
+    crate::miri_println!("machine halt");
+    core::intrinsics::abort()
+}
+
 /// Powers off the system.
 ///
 /// This function will not return. If a poweroff handler is missing or not working, it will halt
 /// all CPUs on the machine.
+#[cfg(not(miri))]
 pub fn poweroff(code: ExitCode) -> ! {
     #[cfg(feature = "coverage")]
     crate::coverage::on_system_exit();
@@ -85,6 +98,7 @@ pub fn poweroff(code: ExitCode) -> ! {
     machine_halt();
 }
 
+#[cfg(not(miri))]
 fn machine_halt() -> ! {
     crate::error!("Halting the machine...");
 

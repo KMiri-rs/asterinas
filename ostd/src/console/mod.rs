@@ -14,7 +14,7 @@ pub fn early_print(args: Arguments) {
         return;
     };
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     crate::arch::if_tdx_enabled!({
         // Hold the lock to prevent the logs from interleaving.
         let _guard = serial.lock();

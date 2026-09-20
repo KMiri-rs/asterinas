@@ -4,11 +4,7 @@ use alloc::sync::Arc;
 use core::{ptr::NonNull, sync::atomic::Ordering};
 
 use super::{POST_SCHEDULE_HANDLER, PRE_SCHEDULE_HANDLER, Task};
-use crate::{
-    arch::task::{context_switch, first_context_switch},
-    cpu_local_cell,
-    irq::DisabledLocalIrqGuard,
-};
+use crate::{arch::task, cpu_local_cell, irq::DisabledLocalIrqGuard};
 
 cpu_local_cell! {
     /// The `Arc<Task>` (casted by [`Arc::into_raw`]) that is the current task.
@@ -53,6 +49,9 @@ pub(super) fn switch_to_task(next_task: Arc<Task>) {
     // CPU, its context can be used exclusively.
     let next_task_ctx_ptr = next_task.ctx().get().cast_const();
 
+    #[cfg(miri)]
+    let miri_next_task = next_task.clone();
+
     let current_task_ptr = CURRENT_TASK_PTR.load();
     CURRENT_TASK_PTR.store(Arc::into_raw(next_task));
     debug_assert!(PREVIOUS_TASK_PTR.load().is_null());
@@ -61,6 +60,7 @@ pub(super) fn switch_to_task(next_task: Arc<Task>) {
     // We must disable IRQs when switching, see `after_switching_to`.
     core::mem::forget(irq_guard);
 
+    #[cfg(not(miri))]
     let current_task_ctx_ptr = if !current_task_ptr.is_null() {
         // SAFETY: The pointer is set by `switch_to_task` and is guaranteed to be
         // built with `Arc::into_raw`. It will only be dropped as a previous task,
@@ -73,7 +73,7 @@ pub(super) fn switch_to_task(next_task: Arc<Task>) {
         // 1. We have exclusive access to the next context (see above).
         // 2. The next context is valid (because it is either correctly initialized or written by a
         //    previous `context_switch`).
-        unsafe { first_context_switch(next_task_ctx_ptr) };
+        unsafe { task::first_context_switch(next_task_ctx_ptr) };
         // We've switched to the first task on the current CPU.
         unreachable!("`first_context_switch` should never return");
     };
@@ -85,7 +85,10 @@ pub(super) fn switch_to_task(next_task: Arc<Task>) {
     unsafe {
         // This function may not return, for example, when the current task exits. So make sure
         // that all variables on the stack can be forgotten without causing resource leakage.
-        context_switch(next_task_ctx_ptr, current_task_ctx_ptr);
+        #[cfg(not(miri))]
+        task::context_switch(next_task_ctx_ptr, current_task_ctx_ptr);
+        #[cfg(miri)]
+        crate::task::scheduler::miri_switch_to(miri_next_task.as_ref());
     }
 
     // SAFETY: The task is just switched back, `after_switching_to` hasn't been called yet.

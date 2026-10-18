@@ -164,6 +164,12 @@ impl<M: AnyFrameMeta + ?Sized> Drop for UniqueFrame<M> {
         // The slot is initialized.
         unsafe { self.slot().drop_last_in_place() };
 
+        // SAFETY: We are the sole owner, so the page is returned to Miri as unused.
+        #[cfg(miri)]
+        unsafe {
+            crate::arch::kern_miri_dealloc_pages(self.paddr(), 1);
+        }
+
         super::allocator::get_global_frame_allocator().dealloc(self.paddr(), PAGE_SIZE);
     }
 }

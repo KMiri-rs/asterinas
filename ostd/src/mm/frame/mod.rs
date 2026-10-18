@@ -266,6 +266,12 @@ impl<M: AnyFrameMeta + ?Sized> Drop for Frame<M> {
             // SAFETY: this is the last reference and is about to be dropped.
             unsafe { self.slot().drop_last_in_place() };
 
+            // SAFETY: The last reference is gone, so the page is returned to Miri as unused.
+            #[cfg(miri)]
+            unsafe {
+                crate::arch::kern_miri_dealloc_pages(self.paddr(), 1);
+            }
+
             allocator::get_global_frame_allocator().dealloc(self.paddr(), PAGE_SIZE);
         }
     }

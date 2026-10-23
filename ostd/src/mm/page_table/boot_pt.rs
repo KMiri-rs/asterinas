@@ -87,11 +87,6 @@ pub(crate) unsafe fn dismiss() {
                 if !flags.contains(PTE_POINTS_TO_FIRMWARE_PT) {
                     // SAFETY: The pointed frame is allocated and forgotten with `into_raw`.
                     drop(unsafe { Frame::<EarlyAllocatedFrameMeta>::from_raw(pa) });
-                    // SAFETY: this callback is called only once even though the walk traverses all ptes.
-                    #[cfg(miri)]
-                    unsafe {
-                        crate::arch::kern_miri_dealloc_pages(pa, 1);
-                    }
                 }
                 // Firmware provided page tables may be a DAG instead of a tree.
                 // Clear it to avoid double-free when we meet it the second time.

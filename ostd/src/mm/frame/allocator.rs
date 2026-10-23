@@ -107,6 +107,12 @@ impl FrameAllocOptions {
             })
             .ok_or(Error::NoMemory)?;
 
+        // SAFETY: The newly allocated segment is guaranteed to be valid.
+        #[cfg(miri)]
+        unsafe {
+            crate::arch::kern_miri_alloc_pages(segment.paddr(), nframes);
+        }
+
         if self.zeroed {
             let addr = paddr_to_vaddr(segment.paddr()) as *mut u8;
             // SAFETY: The newly allocated segment is guaranteed to be valid.

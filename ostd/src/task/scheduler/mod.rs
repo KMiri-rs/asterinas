@@ -528,6 +528,8 @@ unsafe extern "Rust" {
 
     pub fn miri_switch_to(task: &Task);
 
+    pub fn miri_switch_to_after_return(task: &Task);
+
     pub fn miri_load_cpu_local(addr: *const u8) -> *const u8;
 }
 
@@ -627,7 +629,7 @@ pub(super) fn kmiri_exit_current() {
         };
 
         if let Some(next_task) = next_task_opt {
-            return ReschedAction::SwitchTo(next_task.clone());
+            return ReschedAction::ExitTo(next_task.clone());
         }
         retry -= 1;
         if retry == 0 {
@@ -665,7 +667,7 @@ where
     // race conditions, we should do this before making the decision.
     cpu_local::clear_need_preempt();
 
-    let next_task = loop {
+    let (next_task, switch_kind) = loop {
         let mut action = ReschedAction::DoNothing;
         scheduler_singleton().mut_local_rq_with(&mut |rq| {
             action = f(rq);
@@ -679,7 +681,11 @@ where
                 continue;
             }
             ReschedAction::SwitchTo(next_task) => {
-                break next_task;
+                break (next_task, processor::SwitchKind::Resume);
+            }
+            #[cfg(miri)]
+            ReschedAction::ExitTo(next_task) => {
+                break (next_task, processor::SwitchKind::Exit);
             }
         };
     };
@@ -690,7 +696,7 @@ where
     // FIXME: The scheduler decision and context switching are not atomic, which can lead to some
     // strange behavior even if the scheduler is implemented correctly. See "Problem 2" at
     // <https://github.com/asterinas/asterinas/issues/1633> for details.
-    processor::switch_to_task(next_task);
+    processor::switch_to_task(next_task, switch_kind);
 }
 
 /// Possible actions of a rescheduling.
@@ -701,4 +707,7 @@ enum ReschedAction {
     Retry,
     /// Switch to target task.
     SwitchTo(Arc<Task>),
+    /// Finish the current Miri entry before switching to the target task.
+    #[cfg(miri)]
+    ExitTo(Arc<Task>),
 }

@@ -36,7 +36,7 @@ pub(super) fn current_task() -> Option<NonNull<Task>> {
 /// This function will panic if called while holding preemption locks or with
 /// local IRQ disabled.
 #[track_caller]
-pub(super) fn switch_to_task(next_task: Arc<Task>) {
+pub(super) fn switch_to_task(next_task: Arc<Task>, kind: SwitchKind) {
     super::atomic_mode::might_sleep();
 
     // SAFETY: RCU read-side critical sections disables preemption. By the time
@@ -87,21 +87,38 @@ pub(super) fn switch_to_task(next_task: Arc<Task>) {
         miri_next_task.as_ref()
     );
 
-    // SAFETY:
-    // 1. We have exclusive access to both the current context and the next context (see above).
-    // 2. The next context is valid (because it is either correctly initialized or written by a
-    //    previous `context_switch`).
-    unsafe {
-        // This function may not return, for example, when the current task exits. So make sure
-        // that all variables on the stack can be forgotten without causing resource leakage.
-        #[cfg(not(miri))]
-        task::context_switch(next_task_ctx_ptr, current_task_ctx_ptr);
+    match kind {
         #[cfg(miri)]
-        crate::task::scheduler::miri_switch_to(miri_next_task.as_ref());
-    }
+        SwitchKind::Exit => {
+            // Let the exiting entry return before the successor starts. It will
+            // release PREVIOUS_TASK_PTR through its own after_switching_to call.
+            unsafe {
+                crate::task::scheduler::miri_switch_to_after_return(miri_next_task.as_ref());
+            }
+        }
+        SwitchKind::Resume => {
+            // SAFETY:
+            // 1. We have exclusive access to both contexts (see above).
+            // 2. The next context was initialized or written by context_switch.
+            unsafe {
+                // The native exit path may never return; on-stack variables
+                // must be safe to forget, as before.
+                #[cfg(not(miri))]
+                task::context_switch(next_task_ctx_ptr, current_task_ctx_ptr);
+                #[cfg(miri)]
+                crate::task::scheduler::miri_switch_to(miri_next_task.as_ref());
+            }
 
-    // SAFETY: The task is just switched back, `after_switching_to` hasn't been called yet.
-    unsafe { after_switching_to() };
+            // SAFETY: The task just switched back; cleanup has not run yet.
+            unsafe { after_switching_to() };
+        }
+    }
+}
+
+pub(super) enum SwitchKind {
+    Resume,
+    #[cfg(miri)]
+    Exit,
 }
 
 fn before_switching_to(next_task: &Task, irq_guard: &DisabledLocalIrqGuard) {
@@ -129,6 +146,15 @@ fn before_switching_to(next_task: &Task, irq_guard: &DisabledLocalIrqGuard) {
 ///
 /// This function must be called only once after switching to a task.
 pub(super) unsafe fn after_switching_to() {
+    // Miri models tasks as separate threads. Acquire the release CAS performed
+    // by before_switching_to, including caller writes made after task creation.
+    // An RMW observes the latest modification, unlike a weak-memory load, and
+    // leaves the flag unchanged without yielding outside the OSTD scheduler.
+    // SAFETY: CURRENT_TASK_PTR owns an Arc reference after switching. Borrow
+    // only the atomic field until the publication handshake has completed.
+    #[cfg(miri)]
+    unsafe { &(*CURRENT_TASK_PTR.load()).switched_to_cpu }.fetch_or(false, Ordering::Acquire);
+
     // Release the previous task.
     let prev = PREVIOUS_TASK_PTR.load();
     let prev = if !prev.is_null() {

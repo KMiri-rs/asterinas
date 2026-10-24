@@ -496,9 +496,11 @@ pub(crate) fn unpark_target(runnable: Arc<Task>) {
 ///
 #[cfg(miri)]
 pub fn kernel_task_entry(_temp: usize) {
+    // See `switch_to_task` for why we need this.
+    crate::arch::irq::enable_local();
     // SAFETY: The new task is switched on a CPU for the first time, `after_switching_to`
     // hasn't been called yet.
-    unsafe { super::processor::after_switching_to() };
+    unsafe { processor::after_switching_to() };
     miri_println!("[kernel_task_entry]");
 
     let current_task =

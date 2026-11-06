@@ -85,6 +85,7 @@ mod getxattr;
 mod inotify;
 mod ioctl;
 mod kill;
+mod kmiri_debug;
 mod link;
 mod listen;
 mod listmount;

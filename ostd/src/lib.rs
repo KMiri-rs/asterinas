@@ -81,6 +81,8 @@ pub mod prelude;
 pub mod smp;
 pub mod sync;
 pub mod task;
+#[doc(hidden)]
+pub mod kmiri_3896;
 pub mod timer;
 pub mod user;
 pub mod util;

@@ -29,7 +29,7 @@ enum Ev {
     IrqEnabledWhileWitnessLive = 5, // 确认：内层 guard 还活着时中断已开
     MightSleepReturned = 6,         // might_sleep 本应拦截，这里却放行
     Update = 7,                     // 写端替换对象，旧对象进入待回收
-    Reclaim = 8,                    // 旧对象被真正释放（由其 Drop 记录）
+    Reclaim = 8,                    // 旧对象开始析构：其 Drop 运行，紧接着 Box 释放底层内存
     Use = 9,                        // 通过已失效的引用 r 读取（UAF 读）
     InnerDrop = 10,                 // drop 内层 guard
 }
@@ -114,7 +114,7 @@ impl Drop for Payload {
 /// 返回一个小的可观测码，让触发进程不依赖 KMiri 也能看到结果：
 ///   bit 0      = 回收是否严格早于过期读（UAF 窗口命中）；
 ///   bits 8..   = 通过过期引用读到的值；
-///   bits 16..  = 从 retire 到真正回收经过的 yield 次数。
+///   bits 16..  = 从 retire 到真正回收期间调用 Task::yield_now 的次数（注意：不是真实切换次数，多数 yield 在本 CPU 无其它可运行任务时不切换）。
 pub fn trigger_3896() -> u32 {
     reset();
 

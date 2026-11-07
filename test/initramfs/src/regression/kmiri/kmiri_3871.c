@@ -98,6 +98,9 @@ int main(void)
 	printf("[summary] parent TSS.sp0 = 0x%llx, child TSS.sp0 = 0x%llx -> %s\n",
 	       (unsigned long long)parent_sp0, (unsigned long long)child_sp0,
 	       parent_sp0 != child_sp0 ? "DIFFER (rewritten per task)" : "SAME");
+	printf("[summary] plain Rust read of TSS.sp0 = 0x%llx, actual memory = 0x%llx -> %s\n",
+	       (unsigned long long)field("rust_view_sp0"), (unsigned long long)field("now_sp0"),
+	       field("rust_view_matches_memory") ? "CONSISTENT" : "STALE (compiler assumed the static never changes)");
 	const char *v = strstr(buf, "verdict=");
 	printf("KMIRI_3871_RESULT %s ok=%d\n", v ? v : "verdict=?\n", !bad);
 	return bad;

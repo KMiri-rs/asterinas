@@ -161,6 +161,9 @@ pub struct Kmiri3871Snapshot {
     pub now_sp1: u64,
     /// Number of bytes that differ from the compile-time initializer.
     pub changed_bytes: usize,
+    /// `TSS.sp0` read with a plain (non-volatile) load through the static, the way ordinary Rust
+    /// code would read it. The compiler may assume an immutable `Freeze` static never changes.
+    pub rust_view_sp0: u64,
 }
 
 mod kmiri_3871_freeze {
@@ -254,6 +257,10 @@ pub fn kmiri_3871_snapshot() -> Kmiri3871Snapshot {
         }
     }
 
+    // SAFETY: In bounds of the static; the field at offset 4 is unaligned, hence `read_unaligned`.
+    let rust_view_sp0 =
+        unsafe { core::ptr::read_unaligned(base.add(KMIRI_3871_SP0_OFFSET).cast::<u64>()) };
+
     Kmiri3871Snapshot {
         static_addr: kmiri_3871_static_addr(),
         gs_tss_addr: kmiri_3871_gs_addr(),
@@ -266,5 +273,6 @@ pub fn kmiri_3871_snapshot() -> Kmiri3871Snapshot {
         now_sp0: kmiri_3871_read_u64(base, KMIRI_3871_SP0_OFFSET),
         now_sp1: kmiri_3871_read_u64(base, KMIRI_3871_SP1_OFFSET),
         changed_bytes,
+        rust_view_sp0,
     }
 }

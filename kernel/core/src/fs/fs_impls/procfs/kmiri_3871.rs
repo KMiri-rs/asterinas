@@ -53,6 +53,12 @@ impl ProcFileOps for Kmiri3871FileOps {
         writeln!(printer, "now_sp0=0x{:x}", s.now_sp0)?;
         writeln!(printer, "now_sp1=0x{:x}", s.now_sp1)?;
         writeln!(printer, "changed_bytes={}", s.changed_bytes)?;
+        writeln!(printer, "rust_view_sp0=0x{:x}", s.rust_view_sp0)?;
+        writeln!(
+            printer,
+            "rust_view_matches_memory={}",
+            (s.rust_view_sp0 == s.now_sp0) as u8
+        )?;
         writeln!(printer, "verdict={}", verdict)?;
         Ok(printer.bytes_written())
     }

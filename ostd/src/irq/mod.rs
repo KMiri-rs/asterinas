@@ -81,10 +81,26 @@ pub use guard::{DisabledLocalIrqGuard, disable_local};
 pub use level::InterruptLevel;
 pub use top_half::{IrqCallbackFunction, IrqLine};
 
+/// Returns the simulated local IRQ state for KMiri integration tests.
+#[cfg(miri)]
+#[doc(hidden)]
+pub fn miri_local_irqs_enabled() -> bool {
+    crate::arch::irq::is_local_enabled()
+}
+
 use crate::{
     arch::{irq::HwIrqLine, trap::TrapFrame},
     cpu::PrivilegeLevel,
 };
+
+/// Enters the normal timer callback path as an L1 kernel interrupt under KMiri.
+#[cfg(miri)]
+pub(crate) fn call_timer_callback_functions_from_miri(trap_frame: &TrapFrame) {
+    level::enter(
+        || crate::timer::call_timer_callback_functions(trap_frame),
+        PrivilegeLevel::Kernel,
+    );
+}
 
 #[cfg_attr(target_arch = "aarch64", expect(dead_code))]
 pub(crate) fn call_irq_callback_functions(

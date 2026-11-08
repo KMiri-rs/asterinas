@@ -18,12 +18,31 @@ use crate::{
 pub(crate) const IRQ_NUM_MIN: u8 = 32;
 pub(crate) const IRQ_NUM_MAX: u8 = 255;
 
-pub(crate) fn enable_local() {}
+unsafe extern "Rust" {
+    fn kern_miri_irq_is_enabled() -> bool;
+    fn kern_miri_irq_disable();
+    fn kern_miri_irq_enable();
+    fn kern_miri_test_raise_irq(handler: extern "Rust" fn());
+}
 
-pub(crate) fn disable_local() {}
+pub(crate) fn enable_local() {
+    // SAFETY: KMiri owns and validates the simulated per-CPU IRQ state.
+    unsafe { kern_miri_irq_enable() };
+}
+
+pub(crate) fn disable_local() {
+    // SAFETY: KMiri owns and validates the simulated per-CPU IRQ state.
+    unsafe { kern_miri_irq_disable() };
+}
 
 pub(crate) fn is_local_enabled() -> bool {
-    true
+    // SAFETY: This only reads KMiri's simulated per-CPU IRQ state.
+    unsafe { kern_miri_irq_is_enabled() }
+}
+
+pub(crate) fn test_raise_irq(handler: extern "Rust" fn()) {
+    // SAFETY: The test callback is a valid Rust function in the interpreted program.
+    unsafe { kern_miri_test_raise_irq(handler) };
 }
 
 pub struct CallbackElement {
@@ -117,5 +136,10 @@ impl HwCpuId {
     }
 }
 
-pub(crate) fn enable_local_and_halt() {}
-pub(crate) fn disable_local_and_halt() {}
+pub(crate) fn enable_local_and_halt() {
+    enable_local();
+}
+
+pub(crate) fn disable_local_and_halt() {
+    disable_local();
+}

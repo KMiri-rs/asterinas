@@ -42,6 +42,13 @@ where
         .push(Box::new(func));
 }
 
+/// Raises the Miri timer handler from an OSTD integration test.
+#[cfg(miri)]
+#[doc(hidden)]
+pub fn miri_test_raise_timer_irq() {
+    crate::arch::timer::test_raise_irq();
+}
+
 pub(crate) fn call_timer_callback_functions(_: &TrapFrame) {
     let irq_guard = irq::disable_local();
 

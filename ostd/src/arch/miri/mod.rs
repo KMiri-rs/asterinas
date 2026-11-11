@@ -67,6 +67,18 @@ unsafe extern "Rust" {
     /// otherwise, such behavior will be considered UB.
     pub fn kern_miri_dealloc_pages(paddr: usize, page_count: usize);
 
+    /// Informs KernMiri that a heap slot allocation has ended.
+    pub fn kern_miri_dealloc_heap_slot(ptr: *mut u8, slot_size: usize);
+
+    /// Ensures a heap slot has a live KernMiri allocation before it is returned to a caller.
+    pub fn kern_miri_alloc_heap_slot(ptr: *mut u8);
+
+    /// Stores a slab freelist link outside of the slot's object allocation.
+    pub fn kern_miri_set_heap_slot_next(ptr: *mut u8, next: usize);
+
+    /// Reads a slab freelist link stored outside of the slot's object allocation.
+    pub fn kern_miri_get_heap_slot_next(ptr: *mut u8) -> usize;
+
     /// Informs KernMiri to retype `page_count` pages at `paddr` to `page_type`.
     /// Each slot in the page has both size and alignment being `slot_size`.
     ///

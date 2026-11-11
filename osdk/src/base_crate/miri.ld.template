@@ -147,6 +147,10 @@ SECTIONS
         kern_miri_get_root_page_table = .;
         kern_miri_alloc_pages = .;
         kern_miri_dealloc_pages = .;
+        kern_miri_dealloc_heap_slot = .;
+        kern_miri_alloc_heap_slot = .;
+        kern_miri_set_heap_slot_next = .;
+        kern_miri_get_heap_slot_next = .;
         kern_miri_retype_pages = .;
         kern_miri_zero = .;
         kern_miri_read_u8_untyped = .;

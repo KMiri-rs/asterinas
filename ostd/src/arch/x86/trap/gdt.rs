@@ -77,6 +77,9 @@ pub(super) unsafe fn init_on_cpu() {
     // SAFETY: The selector points to the TSS descriptors in the GDT.
     unsafe { load_tss(tss_sel) };
 
+    // KMiri #3871 observation: remember the BSP TSS.sp0 before userspace ever runs.
+    kmiri_3871_record_boot_sp0();
+
     // Set up the selectors for the `syscall` and `sysret` instructions.
     let sysret = SegmentSelector::new(4, PrivilegeLevel::Ring3);
     assert_eq!(gdt[(sysret.index() + 1) as usize], UDATA);
@@ -129,3 +132,147 @@ const KERNEL_SS: SegmentSelector = SegmentSelector::new(2, PrivilegeLevel::Ring0
 
 pub(super) const USER_CS: SegmentSelector = SegmentSelector::new(6, PrivilegeLevel::Ring3);
 pub(super) const USER_SS: SegmentSelector = SegmentSelector::new(5, PrivilegeLevel::Ring3);
+
+// ===== KMiri asterinas#3871 observation probe =====
+//
+// Read-only instrumentation. It is NOT part of the trigger: the write under test is the
+// unmodified `mov gs:4, rsp` / `mov gs:12, rsp` in `syscall.S`, executed on every return to
+// and entry from userspace. This probe only reads the bytes backing `LOCAL_TSS` and reports
+// whether the Rust type stored in the static admits interior mutability (`Freeze`).
+
+/// A snapshot of the BSP `LOCAL_TSS` static, exported through `/proc/kmiri_3871`.
+#[derive(Clone, Copy, Debug)]
+pub struct Kmiri3871Snapshot {
+    /// Address of the Rust static `LOCAL_TSS` itself (the BSP storage).
+    pub static_addr: usize,
+    /// Address the assembly writes through (`GS.base`, i.e. `LOCAL_TSS.as_ptr()`).
+    pub gs_tss_addr: usize,
+    /// The Rust type stored in the static.
+    pub stored_type: &'static str,
+    /// Whether that type is `Freeze` (no `UnsafeCell`), i.e. its bytes must never change.
+    pub stored_type_is_freeze: bool,
+    /// `TSS.sp0` recorded at the end of `init_on_cpu`, before any userspace entry.
+    pub boot_sp0: Option<u64>,
+    /// `TSS.sp0` in the compile-time initializer `TaskStateSegment::new()`.
+    pub init_sp0: u64,
+    /// `TSS.sp0` currently in the static's bytes.
+    pub now_sp0: u64,
+    /// `TSS.sp1` currently in the static's bytes (user rsp scratch of the latest syscall).
+    pub now_sp1: u64,
+    /// Number of bytes that differ from the compile-time initializer.
+    pub changed_bytes: usize,
+    /// `TSS.sp0` read with a plain (non-volatile) load through the static, the way ordinary Rust
+    /// code would read it. The compiler may assume an immutable `Freeze` static never changes.
+    pub rust_view_sp0: u64,
+}
+
+mod kmiri_3871_freeze {
+    use core::marker::{Freeze, PhantomData};
+
+    // Autoref-based dispatch: `(&&Probe<T>).is_freeze()` picks `ViaFreeze` iff `T: Freeze`.
+    pub(super) struct Probe<T>(pub(super) PhantomData<T>);
+    pub(super) trait ViaFreeze {
+        fn is_freeze(&self) -> bool {
+            true
+        }
+    }
+    impl<T: Freeze> ViaFreeze for &Probe<T> {}
+    pub(super) trait ViaAny {
+        fn is_freeze(&self) -> bool {
+            false
+        }
+    }
+    impl<T> ViaAny for Probe<T> {}
+}
+
+static KMIRI_3871_BOOT_SP0: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+static KMIRI_3871_BOOT_RECORDED: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+fn kmiri_3871_phantom<T>(_: &StaticCpuLocal<T>) -> core::marker::PhantomData<T> {
+    core::marker::PhantomData
+}
+
+fn kmiri_3871_static_addr() -> usize {
+    core::ptr::from_ref(&LOCAL_TSS) as usize
+}
+
+fn kmiri_3871_gs_addr() -> usize {
+    LOCAL_TSS.as_ptr() as usize
+}
+
+/// Reads `len` bytes at `addr` with volatile byte loads (the field at offset 4 is unaligned).
+fn kmiri_3871_read_u64(base: *const u8, offset: usize) -> u64 {
+    let mut bytes = [0u8; 8];
+    for (i, b) in bytes.iter_mut().enumerate() {
+        // SAFETY: `base` points to the `LOCAL_TSS` static and `offset + 8 <= size_of::<TSS>()`.
+        *b = unsafe { core::ptr::read_volatile(base.add(offset + i)) };
+    }
+    u64::from_le_bytes(bytes)
+}
+
+const KMIRI_3871_SP0_OFFSET: usize = 4;
+const KMIRI_3871_SP1_OFFSET: usize = 12;
+
+fn kmiri_3871_record_boot_sp0() {
+    use core::sync::atomic::Ordering;
+    // Only the BSP's TSS is the Rust static itself; APs use dynamically allocated storage.
+    if kmiri_3871_gs_addr() != kmiri_3871_static_addr() {
+        return;
+    }
+    let base = core::ptr::from_ref(&LOCAL_TSS).cast::<u8>();
+    let sp0 = kmiri_3871_read_u64(base, KMIRI_3871_SP0_OFFSET);
+    KMIRI_3871_BOOT_SP0.store(sp0, Ordering::Relaxed);
+    KMIRI_3871_BOOT_RECORDED.store(true, Ordering::Release);
+}
+
+/// Takes a read-only snapshot of the BSP `LOCAL_TSS` static.
+pub fn kmiri_3871_snapshot() -> Kmiri3871Snapshot {
+    use core::sync::atomic::Ordering;
+
+    use kmiri_3871_freeze::{Probe, ViaAny as _, ViaFreeze as _};
+
+    fn type_name_of<T>(_: &StaticCpuLocal<T>) -> &'static str {
+        core::any::type_name::<T>()
+    }
+
+    let probe = Probe(kmiri_3871_phantom(&LOCAL_TSS));
+    let stored_type_is_freeze = (&&probe).is_freeze();
+
+    let base = core::ptr::from_ref(&LOCAL_TSS).cast::<u8>();
+    let init = TaskStateSegment::new();
+    let init_base = core::ptr::from_ref(&init).cast::<u8>();
+    let size = size_of::<TaskStateSegment>();
+    let mut changed_bytes = 0;
+    for i in 0..size {
+        // SAFETY: Both pointers cover `size_of::<TaskStateSegment>()` readable bytes.
+        let (now, old) = unsafe {
+            (
+                core::ptr::read_volatile(base.add(i)),
+                core::ptr::read_volatile(init_base.add(i)),
+            )
+        };
+        if now != old {
+            changed_bytes += 1;
+        }
+    }
+
+    // SAFETY: In bounds of the static; the field at offset 4 is unaligned, hence `read_unaligned`.
+    let rust_view_sp0 =
+        unsafe { core::ptr::read_unaligned(base.add(KMIRI_3871_SP0_OFFSET).cast::<u64>()) };
+
+    Kmiri3871Snapshot {
+        static_addr: kmiri_3871_static_addr(),
+        gs_tss_addr: kmiri_3871_gs_addr(),
+        stored_type: type_name_of(&LOCAL_TSS),
+        stored_type_is_freeze,
+        boot_sp0: KMIRI_3871_BOOT_RECORDED
+            .load(Ordering::Acquire)
+            .then(|| KMIRI_3871_BOOT_SP0.load(Ordering::Relaxed)),
+        init_sp0: kmiri_3871_read_u64(init_base, KMIRI_3871_SP0_OFFSET),
+        now_sp0: kmiri_3871_read_u64(base, KMIRI_3871_SP0_OFFSET),
+        now_sp1: kmiri_3871_read_u64(base, KMIRI_3871_SP1_OFFSET),
+        changed_bytes,
+        rust_view_sp0,
+    }
+}

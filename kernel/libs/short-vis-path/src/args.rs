@@ -151,7 +151,18 @@ impl ExpandedPath {
     /// `crate::procfs`; if in `a/src/fs/procfs/mod.rs`, returns `crate::fs::procfs`.
     fn new() -> Self {
         let callsite_span = Span::call_site();
-        let Some(local_path) = callsite_span.local_file() else {
+        // `proc_macro2::Span::local_file` only reaches the compiler when the
+        // proc-macro2 build script detected `proc_macro_span_file`. Under
+        // `cargo miri` that probe is misrouted (it passes `--target <host>`, so
+        // cargo-miri treats it as a Miri target crate) and fails, leaving
+        // proc-macro2 to answer `None`. Ask `proc_macro` directly when inside
+        // a macro expansion; the answer is the same file either way.
+        let local_file = if proc_macro::is_available() {
+            proc_macro::Span::call_site().local_file()
+        } else {
+            callsite_span.local_file()
+        };
+        let Some(local_path) = local_file else {
             panic!("Unknown local file path to call site span {callsite_span:?}.");
         };
         let Ok(local_path) = local_path.canonicalize() else {

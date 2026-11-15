@@ -80,10 +80,20 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let body = ostd_main_body(main_fn_name);
 
     quote!(
-        #[cfg(not(ktest))]
+        #[cfg(not(any(ktest, miri)))]
         // SAFETY: The name does not collide with other symbols.
         #[unsafe(no_mangle)]
         extern "Rust" fn __ostd_main() -> ! {
+            #body
+        }
+
+        // `cargo osdk miri` always builds with `--cfg=ktest`, but no ktest runner exists under
+        // miri, so keep the real kernel entry. The miri boot code declares
+        // `fn __ostd_main()`, so the signature must return `()`.
+        #[cfg(miri)]
+        // SAFETY: The name does not collide with other symbols.
+        #[unsafe(no_mangle)]
+        extern "Rust" fn __ostd_main() {
             #body
         }
 

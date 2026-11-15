@@ -35,7 +35,7 @@ macro_rules! declare_rtc_drivers {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", not(miri)))]
 mod cmos;
 #[cfg(target_arch = "riscv64")]
 mod goldfish;
@@ -43,7 +43,7 @@ mod goldfish;
 mod loongson;
 
 declare_rtc_drivers! {
-    #[cfg(target_arch = "x86_64")] cmos::RtcCmos,
+    #[cfg(all(target_arch = "x86_64", not(miri)))] cmos::RtcCmos,
     #[cfg(target_arch = "riscv64")] goldfish::RtcGoldfish,
     #[cfg(target_arch = "loongarch64")] loongson::RtcLoongson,
 }

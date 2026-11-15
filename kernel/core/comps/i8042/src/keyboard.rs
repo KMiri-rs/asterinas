@@ -35,6 +35,15 @@ const ISA_INTR_NUM: u8 = 1;
 /// Translation mode for keyboard scancodes.
 static TRANSLATION_MODE: AtomicU8 = AtomicU8::new(TranslationMode::Hardware as u8);
 
+#[cfg(miri)]
+pub(super) fn init(
+    _controller: &mut I8042Controller,
+    _translation_mode: TranslationMode,
+) -> Result<(), I8042ControllerError> {
+    Ok(())
+}
+
+#[cfg(not(miri))]
 pub(super) fn init(
     controller: &mut I8042Controller,
     translation_mode: TranslationMode,

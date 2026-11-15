@@ -7,7 +7,8 @@ use ostd::{debug, io::IoMem, mm::HasPaddr, sync::SpinLock};
 
 use crate::transport::mmio::bus::common_device::{mmio_check_magic, mmio_read_device_id};
 
-#[cfg_attr(target_arch = "x86_64", path = "arch/x86.rs")]
+#[cfg_attr(miri, path = "arch/miri.rs")]
+#[cfg_attr(all(target_arch = "x86_64", not(miri)), path = "arch/x86.rs")]
 #[cfg_attr(target_arch = "riscv64", path = "arch/riscv.rs")]
 #[cfg_attr(target_arch = "loongarch64", path = "arch/loongarch.rs")]
 #[cfg_attr(target_arch = "aarch64", path = "arch/arm.rs")]
@@ -21,7 +22,7 @@ pub(super) mod common_device;
 pub(super) static MMIO_BUS: SpinLock<MmioBus> = SpinLock::new(MmioBus::new());
 
 pub(super) fn init() {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     ostd::if_tdx_enabled!({
         // TODO: support virtio-mmio devices on TDX.
         //
@@ -30,7 +31,7 @@ pub(super) fn init() {
     } else {
         arch::probe_for_device();
     });
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(any(miri, not(target_arch = "x86_64")))]
     arch::probe_for_device();
 }
 

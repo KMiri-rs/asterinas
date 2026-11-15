@@ -7,6 +7,7 @@ pub mod cpu;
 pub mod device;
 pub mod io;
 pub mod iommu;
+pub mod kernel;
 pub(crate) mod irq;
 pub mod mm;
 pub(crate) mod pci;
@@ -28,6 +29,7 @@ pub(crate) unsafe fn late_init_on_bsp() {
     let io_mem_builder = unsafe { io::construct_io_mem_allocator_builder() };
 
     irq::init();
+    kernel::init();
     timer::init();
 
     // SAFETY: We're on the BSP and we're ready to boot all APs.

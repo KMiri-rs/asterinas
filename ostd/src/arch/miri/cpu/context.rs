@@ -499,7 +499,7 @@ impl FpuContext {
     }
 
     /// Loads CPU's FPU context from this instance.
-    pub fn load(&mut self) {
+    pub fn load(&self) {
         let mem_addr = self.as_bytes().as_ptr();
 
         if let Some(xstate_max_features) = XSTATE_MAX_FEATURES.get() {
@@ -615,3 +615,66 @@ static XSAVE_AREA_SIZE: Once<usize> = Once::new();
 
 /// The max size in bytes of the XSAVE area.
 const MAX_XSAVE_AREA_SIZE: usize = 4096;
+
+/// RFLAGS bits that user space may modify. Same mask as the x86 arch.
+pub const USER_MODIFIABLE_RFLAGS: usize = (RFlags::CARRY_FLAG.bits()
+    | RFlags::PARITY_FLAG.bits()
+    | RFlags::AUXILIARY_CARRY_FLAG.bits()
+    | RFlags::ZERO_FLAG.bits()
+    | RFlags::SIGN_FLAG.bits()
+    | RFlags::TRAP_FLAG.bits()
+    | RFlags::DIRECTION_FLAG.bits()
+    | RFlags::OVERFLOW_FLAG.bits()
+    | RFlags::RESUME_FLAG.bits()
+    | RFlags::ALIGNMENT_CHECK.bits()
+    | RFlags::NESTED_TASK.bits()) as usize;
+
+/// The user-mode FS base register.
+///
+/// KMiri has no user mode, so `save`/`load` keep the value in memory only
+/// (no `rdfsbase`/`wrfsbase`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FsBase(usize);
+
+impl FsBase {
+    /// Creates a new `FsBase` with the given address.
+    pub fn new(addr: usize) -> Self {
+        Self(addr)
+    }
+
+    /// Returns the stored address.
+    pub fn addr(&self) -> usize {
+        self.0
+    }
+
+    /// No-op under KMiri.
+    pub fn save(&mut self) {}
+
+    /// No-op under KMiri.
+    pub fn load(&self) {}
+}
+
+/// The user-mode GS base register.
+///
+/// KMiri has no user mode, so `save`/`load` keep the value in memory only
+/// (no `swapgs`/`rdgsbase`/`wrgsbase`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GsBase(usize);
+
+impl GsBase {
+    /// Creates a new `GsBase` with the given address.
+    pub fn new(addr: usize) -> Self {
+        Self(addr)
+    }
+
+    /// Returns the stored address.
+    pub fn addr(&self) -> usize {
+        self.0
+    }
+
+    /// No-op under KMiri.
+    pub fn save(&mut self, _guard: &crate::irq::DisabledLocalIrqGuard) {}
+
+    /// No-op under KMiri.
+    pub fn load(&self, _guard: &crate::irq::DisabledLocalIrqGuard) {}
+}

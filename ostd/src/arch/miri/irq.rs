@@ -22,7 +22,8 @@ unsafe extern "Rust" {
     fn kern_miri_irq_is_enabled() -> bool;
     fn kern_miri_irq_disable();
     fn kern_miri_irq_enable();
-    fn kern_miri_test_raise_irq(handler: extern "Rust" fn());
+    fn kern_miri_register_irq_entry(entry: extern "Rust" fn(u8));
+    fn kern_miri_test_raise_irq(vector: u8);
 }
 
 pub(crate) fn enable_local() {
@@ -40,9 +41,19 @@ pub(crate) fn is_local_enabled() -> bool {
     unsafe { kern_miri_irq_is_enabled() }
 }
 
-pub(crate) fn test_raise_irq(handler: extern "Rust" fn()) {
-    // SAFETY: The test callback is a valid Rust function in the interpreted program.
-    unsafe { kern_miri_test_raise_irq(handler) };
+extern "Rust" fn miri_irq_entry(vector: u8) {
+    crate::arch::trap::miri_dispatch_irq(vector);
+}
+
+pub(crate) fn init() {
+    // SAFETY: Called once on the BSP, before any timer vector or test IRQ is set up.
+    // The retained Rust entry dispatches the vector through the native trap path.
+    unsafe { kern_miri_register_irq_entry(miri_irq_entry) };
+}
+
+pub(crate) fn test_raise_irq(vector: u8) {
+    // SAFETY: KMiri validates the vector and invokes the registered Rust entry.
+    unsafe { kern_miri_test_raise_irq(vector) };
 }
 
 pub struct CallbackElement {

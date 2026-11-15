@@ -24,32 +24,22 @@ pub(crate) static TIMEBASE_FREQ: AtomicU64 = AtomicU64::new(1);
 static TIMER_IRQ: Once<IrqLine> = Once::new();
 
 unsafe extern "Rust" {
-    fn kern_miri_register_timer_irq(handler: extern "Rust" fn());
+    fn kern_miri_set_timer_vector(vector: u8);
 }
 
 /// Registers the OSTD timer callback path with KMiri.
 pub(crate) fn init() {
     let mut timer_irq = IrqLine::alloc().unwrap();
     timer_irq.on_active(|trap_frame| crate::timer::call_timer_callback_functions(trap_frame));
+    let vector = timer_irq.num();
     TIMER_IRQ.call_once(|| timer_irq);
 
-    // SAFETY: `miri_timer_irq_entry` is a valid, retained MIR function that
-    // dispatches through the native `trap_handler` path.
-    unsafe { kern_miri_register_timer_irq(miri_timer_irq_entry) };
+    // SAFETY: The allocated IRQ line has an external-interrupt vector, and its
+    // callback is installed before automatic timer delivery can begin.
+    unsafe { kern_miri_set_timer_vector(vector) };
 }
 
-/// The interpreter-invoked timer IRQ entry. It synthesizes a trap frame and
-/// enters the kernel's native interrupt path (`trap_handler` -> top_half ->
-/// bottom_half), instead of short-circuiting into the timer callbacks.
-extern "Rust" fn miri_timer_irq_entry() {
-    let vector = TIMER_IRQ
-        .get()
-        .expect("timer IRQ raised before timer::init")
-        .num();
-    crate::arch::trap::miri_dispatch_irq(vector);
-}
-
-/// Queues the registered timer entry for an OSTD Miri integration test.
+/// Raises the timer vector for an OSTD Miri integration test.
 pub(crate) fn test_raise_irq() {
-    crate::arch::irq::test_raise_irq(miri_timer_irq_entry);
+    crate::arch::irq::test_raise_irq(TIMER_IRQ.get().unwrap().num());
 }

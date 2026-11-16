@@ -123,7 +123,7 @@ unsafe impl GlobalAlloc for AllocDispatch {
 
         #[cfg(miri)]
         if matches!(slot.info(), SlotInfo::SlabSlot(_)) {
-            unsafe { crate::arch::kern_miri_alloc_heap_slot(slot.as_ptr()) };
+            unsafe { crate::arch::kern_miri_alloc_heap_slot(slot.as_ptr(), layout.size()) };
         }
 
         slot.as_ptr() as usize as *mut u8
@@ -143,8 +143,14 @@ unsafe impl GlobalAlloc for AllocDispatch {
         // require `slot_size_from_layout` to be idempotent.
         let slot = unsafe { HeapSlot::new(NonNull::new_unchecked(ptr), required_slot) };
 
+        // End the object's Miri allocation before the slot goes back to the
+        // freelist. Otherwise an interrupt arriving in between could be handed
+        // the same slot while the old allocation is still live.
         #[cfg(miri)]
-        let is_slab_slot = matches!(slot.info(), SlotInfo::SlabSlot(_));
+        if matches!(slot.info(), SlotInfo::SlabSlot(_)) {
+            unsafe { crate::arch::kern_miri_dealloc_heap_slot(ptr, layout.size()) };
+        }
+
         let res = get_global_heap_allocator().dealloc(slot);
 
         if res.is_err() {
@@ -155,11 +161,5 @@ unsafe impl GlobalAlloc for AllocDispatch {
                 required_slot,
             );
         }
-
-        #[cfg(miri)]
-        if is_slab_slot {
-            unsafe { crate::arch::kern_miri_dealloc_heap_slot(ptr, required_slot.size()) };
-        }
-
     }
 }

@@ -104,8 +104,8 @@ fn encode_as_port(location: &PciDeviceLocation) -> u32 {
 /// Initializes the platform-specific module for accessing the PCI configuration space.
 ///
 /// Returns a range for the PCI bus number, or [`None`] if there is no PCI bus.
+#[cfg(not(miri))]
 pub(crate) fn init() -> Option<RangeInclusive<u8>> {
-    #[cfg(not(miri))]
     if let Some(ecam) = ACPI_INFO.get().unwrap().pci_ecam_region.as_ref() {
         let bus_start = ecam.bus_start;
         let bus_end = ecam.bus_end;
@@ -133,6 +133,13 @@ pub(crate) fn init() -> Option<RangeInclusive<u8>> {
     });
 
     Some(0..=255)
+}
+
+/// Under KMiri there is no PCI bus: neither the ECAM region nor the
+/// 0xCF8/0xCFC ports are modeled (OSTD's I/O port allocator does not exist).
+#[cfg(miri)]
+pub(crate) fn init() -> Option<RangeInclusive<u8>> {
+    None
 }
 
 pub(crate) const MSIX_DEFAULT_MSG_ADDR: u32 = 0xFEE0_0000;

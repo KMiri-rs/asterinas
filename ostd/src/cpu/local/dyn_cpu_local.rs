@@ -140,6 +140,19 @@ impl<const ITEM_SIZE: usize> DynCpuLocalChunk<ITEM_SIZE> {
             .zeroed(false)
             .alloc_segment_with(total_chunk_size.div_ceil(PAGE_SIZE), |_| DynCpuLocalMeta)?;
 
+        // SAFETY: Mark the chunk pages as typed pages of `ITEM_SIZE` slots in
+        // miri, as is done for slab pages. They are freshly allocated and have
+        // not been retyped.
+        #[cfg(miri)]
+        unsafe {
+            crate::arch::kern_miri_retype_pages(
+                segment.paddr(),
+                total_chunk_size.div_ceil(PAGE_SIZE),
+                crate::arch::PageType::Slab,
+                ITEM_SIZE,
+            );
+        }
+
         let num_items = CHUNK_SIZE / ITEM_SIZE;
         const { assert!(CHUNK_SIZE.is_multiple_of(ITEM_SIZE)) };
 

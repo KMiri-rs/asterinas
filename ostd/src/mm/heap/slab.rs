@@ -110,7 +110,7 @@ impl<const SLOT_SIZE: usize> Slab<SLOT_SIZE> {
             crate::arch::kern_miri_retype_pages(
                 head_paddr,
                 1,
-                crate::arch::PageType::Slab,
+                crate::arch::PageType::Heap,
                 SLOT_SIZE,
             );
             // zeroed is false, so no need to call kern_miri_zero

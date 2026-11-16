@@ -45,8 +45,23 @@ impl<T> BitVec<T> {
         let old_len = self.len;
         self.words.resize(new_len.div_ceil(BITS_PER_WORD), 0);
         self.len = new_len;
-        for id in old_len..new_len {
-            self.set(id, value);
+        // Whole words are filled at once. Setting bits one by one takes
+        // minutes under Miri for a large ID space such as the 2^20 block
+        // device IDs.
+        let whole_start = old_len.div_ceil(BITS_PER_WORD);
+        let whole_end = new_len / BITS_PER_WORD;
+        if whole_start < whole_end {
+            for id in old_len..whole_start * BITS_PER_WORD {
+                self.set(id, value);
+            }
+            self.words[whole_start..whole_end].fill(if value { u64::MAX } else { 0 });
+            for id in whole_end * BITS_PER_WORD..new_len {
+                self.set(id, value);
+            }
+        } else {
+            for id in old_len..new_len {
+                self.set(id, value);
+            }
         }
     }
 

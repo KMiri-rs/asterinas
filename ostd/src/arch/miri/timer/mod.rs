@@ -16,7 +16,9 @@ use crate::irq::IrqLine;
 /// is spent executing timer code.
 pub const TIMER_FREQ: u64 = 1000;
 
-pub(crate) static TIMEBASE_FREQ: AtomicU64 = AtomicU64::new(1);
+/// The frequency of the TSC. The TSC is KernMiri's clock (see
+/// `arch::read_tsc`), which counts nanoseconds.
+pub(crate) static TIMEBASE_FREQ: AtomicU64 = AtomicU64::new(1_000_000_000);
 
 /// The timer IRQ line, allocated like `arch/x86/timer/apic.rs::init_on_bsp` so
 /// that the timer callback lives in the native `top_half` INNERS table and the

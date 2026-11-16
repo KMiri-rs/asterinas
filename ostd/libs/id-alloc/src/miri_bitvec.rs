@@ -112,3 +112,34 @@ impl<T> BitRange<'_, T> {
         self.range.clone().position(|id| !self.bits.bit(id))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::BitVec;
+
+    /// `resize` gives the same bits as `bitvec`'s, whether the old and the new
+    /// length fall on a word boundary or inside a word.
+    #[test]
+    fn resize_matches_bitvec() {
+        const LENS: [usize; 15] = [0, 1, 2, 63, 64, 65, 100, 127, 128, 129, 191, 192, 193, 256, 300];
+        for old_len in LENS {
+            for new_len in LENS.into_iter().filter(|&len| len >= old_len) {
+                for value in [false, true] {
+                    let mut bits = BitVec::<u8>::with_capacity(new_len);
+                    let mut expected = bitvec::vec::BitVec::<u8>::new();
+                    bits.resize(old_len, !value);
+                    expected.resize(old_len, !value);
+                    bits.resize(new_len, value);
+                    expected.resize(new_len, value);
+                    assert_eq!(bits.len(), expected.len());
+                    for id in 0..new_len {
+                        assert_eq!(
+                            bits[id], expected[id],
+                            "old_len {old_len}, new_len {new_len}, value {value}, bit {id}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

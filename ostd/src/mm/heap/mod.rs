@@ -121,10 +121,13 @@ unsafe impl GlobalAlloc for AllocDispatch {
             );
         }
 
+        // Both slab slots and large slots get a KernMiri allocation of the
+        // object's size. A large slot's address comes from an integer
+        // (`paddr_to_vaddr`), so without this it would have no provenance.
         #[cfg(miri)]
-        if matches!(slot.info(), SlotInfo::SlabSlot(_)) {
-            unsafe { crate::arch::kern_miri_alloc_heap_slot(slot.as_ptr(), layout.size()) };
-        }
+        unsafe {
+            crate::arch::kern_miri_alloc_heap_slot(slot.as_ptr(), layout.size())
+        };
 
         slot.as_ptr() as usize as *mut u8
     }
@@ -147,9 +150,9 @@ unsafe impl GlobalAlloc for AllocDispatch {
         // freelist. Otherwise an interrupt arriving in between could be handed
         // the same slot while the old allocation is still live.
         #[cfg(miri)]
-        if matches!(slot.info(), SlotInfo::SlabSlot(_)) {
-            unsafe { crate::arch::kern_miri_dealloc_heap_slot(ptr, layout.size()) };
-        }
+        unsafe {
+            crate::arch::kern_miri_dealloc_heap_slot(ptr, layout.size())
+        };
 
         let res = get_global_heap_allocator().dealloc(slot);
 

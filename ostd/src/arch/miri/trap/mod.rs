@@ -153,6 +153,25 @@ unsafe extern "sysv64" fn trap_handler(f: &mut TrapFrame) {
     }
 }
 
+/// Dispatches a KMiri-injected external interrupt through the native
+/// `trap_handler`, mirroring `trap.S`'s `call trap_handler` on real x86.
+///
+/// The synthesized [`TrapFrame`] carries the interrupt vector in `trap_num`
+/// and sets the IF bit in `rflags`: the interpreter only delivers interrupts
+/// while simulated local IRQs are enabled, so the pre-trap IF state is
+/// always "enabled" here (`was_irq_enabled` consistency in `trap_handler`).
+pub(in crate::arch) fn miri_dispatch_irq(trap_num: u8) {
+    let mut f = TrapFrame {
+        trap_num: trap_num as usize,
+        rflags: x86_64::registers::rflags::RFlags::INTERRUPT_FLAG.bits() as usize,
+        ..TrapFrame::default()
+    };
+    // SAFETY: The frame is a well-formed external-interrupt frame (vector >= 32,
+    // error code 0); `trap_handler` takes the `None` exception branch and only
+    // passes the frame to IRQ callbacks.
+    unsafe { trap_handler(&mut f) };
+}
+
 #[expect(clippy::type_complexity)]
 static USER_PAGE_FAULT_HANDLER: Once<fn(&CpuException) -> Result<(), ()>> = Once::new();
 

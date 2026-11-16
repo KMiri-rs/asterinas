@@ -4,7 +4,9 @@
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use crate::arch::trap::TrapFrame;
+use spin::Once;
+
+use crate::irq::IrqLine;
 
 /// The timer frequency (Hz). Here we choose 1000Hz since 1000Hz is easier for unit conversion and
 /// convenient for timer. What's more, the frequency cannot be set too high or too low, 1000Hz is
@@ -16,23 +18,28 @@ pub const TIMER_FREQ: u64 = 1000;
 
 pub(crate) static TIMEBASE_FREQ: AtomicU64 = AtomicU64::new(1);
 
+/// The timer IRQ line, allocated like `arch/x86/timer/apic.rs::init_on_bsp` so
+/// that the timer callback lives in the native `top_half` INNERS table and the
+/// timer has a real interrupt vector.
+static TIMER_IRQ: Once<IrqLine> = Once::new();
+
 unsafe extern "Rust" {
-    fn kern_miri_register_timer_irq(handler: extern "Rust" fn());
+    fn kern_miri_set_timer_vector(vector: u8);
 }
 
 /// Registers the OSTD timer callback path with KMiri.
 pub(crate) fn init() {
-    // SAFETY: `miri_timer_irq_entry` is a valid, retained MIR function whose
-    // callback dispatch stays within OSTD's normal timer path.
-    unsafe { kern_miri_register_timer_irq(miri_timer_irq_entry) };
+    let mut timer_irq = IrqLine::alloc().unwrap();
+    timer_irq.on_active(|trap_frame| crate::timer::call_timer_callback_functions(trap_frame));
+    let vector = timer_irq.num();
+    TIMER_IRQ.call_once(|| timer_irq);
+
+    // SAFETY: The allocated IRQ line has an external-interrupt vector, and its
+    // callback is installed before automatic timer delivery can begin.
+    unsafe { kern_miri_set_timer_vector(vector) };
 }
 
-extern "Rust" fn miri_timer_irq_entry() {
-    let trap_frame = TrapFrame::default();
-    crate::irq::call_timer_callback_functions_from_miri(&trap_frame);
-}
-
-/// Queues the registered timer entry for an OSTD Miri integration test.
+/// Raises the timer vector for an OSTD Miri integration test.
 pub(crate) fn test_raise_irq() {
-    crate::arch::irq::test_raise_irq(miri_timer_irq_entry);
+    crate::arch::irq::test_raise_irq(TIMER_IRQ.get().unwrap().num());
 }

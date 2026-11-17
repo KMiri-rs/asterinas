@@ -15,23 +15,33 @@ impl IoPortWriteAccess for ReadWriteAccess {}
 impl IoPortReadAccess for ReadWriteAccess {}
 
 pub trait PortRead: Sized {
-    unsafe fn read_from_port(_port: u16) -> Self {
-        unimplemented!()
-    }
+    unsafe fn read_from_port(port: u16) -> Self;
 }
 
 pub trait PortWrite: Sized {
-    unsafe fn write_to_port(_port: u16, _value: Self) {
-        unimplemented!()
-    }
+    unsafe fn write_to_port(port: u16, value: Self);
 }
 
-impl PortRead for u8 {}
-impl PortWrite for u8 {}
-impl PortRead for u16 {}
-impl PortWrite for u16 {}
-impl PortRead for u32 {}
-impl PortWrite for u32 {}
+// Port I/O goes to KernMiri's port bus, which decides what each port does.
+macro_rules! impl_port_access {
+    ($($ty:ty),*) => {$(
+        impl PortRead for $ty {
+            unsafe fn read_from_port(port: u16) -> Self {
+                // SAFETY: A port bus access does not touch the kernel's memory.
+                unsafe { super::super::kern_miri_port_read(port, size_of::<$ty>()) as $ty }
+            }
+        }
+
+        impl PortWrite for $ty {
+            unsafe fn write_to_port(port: u16, value: Self) {
+                // SAFETY: A port bus access does not touch the kernel's memory.
+                unsafe { super::super::kern_miri_port_write(port, size_of::<$ty>(), value as u32) }
+            }
+        }
+    )*};
+}
+
+impl_port_access!(u8, u16, u32);
 
 /// An I/O port, representing a specific address in the I/O address of x86.
 ///

@@ -10,6 +10,7 @@ pub mod iommu;
 pub(crate) mod irq;
 pub mod mm;
 pub(crate) mod pci;
+pub mod power;
 pub mod qemu;
 pub mod serial;
 pub mod task;

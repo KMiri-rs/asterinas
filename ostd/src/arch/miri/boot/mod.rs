@@ -60,6 +60,15 @@ use crate::boot::{EARLY_INFO, EarlyBootInfo};
 /// The entry point of the Rust code portion of Asterinas.
 #[unsafe(no_mangle)]
 pub fn miri_boot() {
+    // Point the BSP's CPU-local base register at the `.cpu_local` section before
+    // any CPU-local variable is used, as `bsp_boot.S` does on x86. KMiri starts the
+    // register at its reset value 0 and provides the section symbols.
+    unsafe extern "C" {
+        fn __cpu_local_start();
+    }
+    // SAFETY: This is the first code on the BSP; no CPU-local variable is in use.
+    unsafe { crate::arch::cpu::local::set_base(__cpu_local_start as *const () as u64) };
+
     EARLY_INFO.call_once(|| EarlyBootInfo {
         bootloader_name: parse_bootloader_name(),
         kernel_cmdline: parse_kernel_commandline(),

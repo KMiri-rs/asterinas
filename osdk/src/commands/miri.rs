@@ -45,7 +45,10 @@ impl CrateDirectoryPaths {
             &self.cargo_target_directory,
             config,
             action,
-            &["--cfg=ktest", "--cfg=miri"],
+            // Like `cargo osdk test`, build test kernels with `panic=unwind`, so that
+            // `catch_unwind` catches panics as it does natively. The target defaults to abort,
+            // and Cargo does not pass `-C panic=unwind` for a profile that asks for it.
+            &["--cfg=ktest", "--cfg=miri", "-C panic=unwind"],
         );
     }
 

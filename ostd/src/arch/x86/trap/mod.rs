@@ -17,6 +17,9 @@
 //! Handles trap.
 
 pub(super) mod gdt;
+
+// KMiri #3871 observation probe.
+pub use gdt::{Kmiri3871Snapshot, kmiri_3871_snapshot};
 mod idt;
 mod syscall;
 

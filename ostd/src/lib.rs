@@ -6,6 +6,7 @@
 #![feature(btree_cursors)]
 #![feature(core_intrinsics)]
 #![feature(format_args_nl)]
+#![feature(freeze)]
 #![feature(linkage)]
 #![feature(min_specialization)]
 #![feature(negative_impls)]

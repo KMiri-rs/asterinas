@@ -15,6 +15,7 @@ SUBDIRS := \
 	device \
 	fs \
 	hello_world \
+	kmiri \
 	io \
 	ipc \
 	memory \

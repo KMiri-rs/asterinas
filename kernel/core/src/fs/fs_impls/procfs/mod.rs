@@ -18,6 +18,7 @@ use self::{
     self_::SelfSymOps,
     sys::SysDirOps,
     thread_self::ThreadSelfSymOps,
+    kmiri_3871::Kmiri3871FileOps,
     uptime::UptimeFileOps,
     version::VersionFileOps,
 };
@@ -43,6 +44,7 @@ use crate::{
 mod cmdline;
 mod cpuinfo;
 mod filesystems;
+mod kmiri_3871;
 mod loadavg;
 mod meminfo;
 mod mounts;
@@ -169,6 +171,7 @@ impl RootDirOps {
             InodeType::SymLink,
             ThreadSelfSymOps::new_inode,
         ),
+        ("kmiri_3871", InodeType::File, Kmiri3871FileOps::new_inode),
         ("uptime", InodeType::File, UptimeFileOps::new_inode),
         ("version", InodeType::File, VersionFileOps::new_inode),
     ];

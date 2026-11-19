@@ -106,13 +106,14 @@ fn try_traverse_and_lock_subtree_root<'rcu, C: PageTableConfig>(
             break;
         }
 
-        let cur_pt_ptr = paddr_to_vaddr(cur_pt_addr) as *mut C::E;
+        let cur_pt_ptr =
+            (paddr_to_vaddr(cur_pt_addr) + start_idx * size_of::<C::E>()) as *mut C::E;
         // SAFETY:
         //  - The page table node is alive because (1) the root node is alive and
         //    (2) all child nodes cannot be recycled because we're in the RCU critical section.
         //  - The index is inside the bound, so the page table entry is valid.
         //  - All page table entries are aligned and accessed with atomic operations only.
-        let cur_pte = unsafe { load_pte(cur_pt_ptr.add(start_idx), Ordering::Acquire) };
+        let cur_pte = unsafe { load_pte(cur_pt_ptr, Ordering::Acquire) };
 
         match cur_pte.to_repr(cur_level) {
             PteScalar::Mapped(_, _) => {

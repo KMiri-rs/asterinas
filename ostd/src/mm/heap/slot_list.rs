@@ -57,16 +57,16 @@ impl<const SLOT_SIZE: usize> SlabSlotList<SLOT_SIZE> {
         debug_assert!(!slot_ptr.is_null());
         // SAFETY: A pointer to a slot must not be NULL;
         self.head = Some(unsafe { NonNull::new_unchecked(slot_ptr) });
+        // Under Miri, `slot_ptr` may carry the provenance of the object just
+        // freed in this slot. The allocator owns the slab memory, not that
+        // object, so access the slot through its address. Address, size and
+        // alignment of the write are unchanged.
         #[cfg(miri)]
+        let slot_ptr = core::ptr::with_exposed_provenance_mut::<u8>(slot_ptr.addr());
+        // Write the original head to the slot.
+        // SAFETY: A heap slot must be free so the pointer to the slot can be
+        // written to. The slot size is at least the size of a pointer.
         unsafe {
-            crate::arch::kern_miri_set_heap_slot_next(
-                slot_ptr,
-                original_head.map_or(0, |h| h.as_ptr() as usize),
-            );
-        }
-        #[cfg(not(miri))]
-        unsafe {
-            // A heap slot must be free and large enough to hold a pointer.
             slot_ptr
                 .cast::<usize>()
                 .write(original_head.map_or(0, |h| h.as_ptr() as usize));
@@ -79,15 +79,13 @@ impl<const SLOT_SIZE: usize> SlabSlotList<SLOT_SIZE> {
     pub fn pop(&mut self) -> Option<HeapSlot> {
         let original_head = self.head?;
 
+        let head_ptr = original_head.as_ptr();
+        // Under Miri, access the slot through its address; see `push`.
         #[cfg(miri)]
-        let next = unsafe {
-            crate::arch::kern_miri_get_heap_slot_next(original_head.as_ptr()) as *mut u8
-        };
-        #[cfg(not(miri))]
-        let next = {
-            // SAFETY: The head is a valid pointer to a free slot containing its next link.
-            unsafe { original_head.as_ptr().cast::<usize>().read() as *mut u8 }
-        };
+        let head_ptr = core::ptr::with_exposed_provenance_mut::<u8>(head_ptr.addr());
+        // SAFETY: The head is a valid pointer to a free slot.
+        // The slot contains a pointer to the next slot.
+        let next = unsafe { head_ptr.cast::<usize>().read() } as *mut u8;
 
         self.head = if next.is_null() {
             None

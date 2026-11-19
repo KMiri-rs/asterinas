@@ -10,6 +10,10 @@ pub(crate) struct TaskContext {
     pub regs: CalleeRegs,
     pub pc: usize,
     pub fsbase: usize,
+    /// The KMiri thread that runs this task. It stands in for the saved
+    /// registers a native context switch resumes from, and like them it lives
+    /// in the task's context, so it moves with the `Task` value.
+    pub(crate) kmiri_thread: usize,
 }
 
 /// Callee-saved registers.
@@ -71,6 +75,7 @@ impl TaskContext {
             regs: CalleeRegs::new(),
             pc: 0,
             fsbase: 0,
+            kmiri_thread: 0,
         }
     }
 

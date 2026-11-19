@@ -2,6 +2,9 @@
 
 #![doc = include_str!("../README.md")]
 #![feature(alloc_error_handler)]
+// KMiri: the KMiri toolchain (rustc 1.99-dev, 2026-09-13) predates the stabilization of
+// `core::alloc::AllocError`, which upstream relies on since nightly-2026-11-16.
+#![cfg_attr(miri, feature(allocator_api))]
 #![feature(btree_cursors)]
 #![feature(core_intrinsics)]
 #![feature(format_args_nl)]

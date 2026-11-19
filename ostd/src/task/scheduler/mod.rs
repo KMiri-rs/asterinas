@@ -529,9 +529,9 @@ unsafe extern "Rust" {
         stack_size: usize,
     );
 
-    pub fn miri_switch_to(task: &Task);
+    pub fn miri_switch_to(task: *const Task);
 
-    pub fn miri_switch_to_after_return(task: &Task);
+    pub fn miri_switch_to_after_return(task: *const Task);
 
     pub fn miri_load_cpu_local(addr: *const u8) -> *const u8;
 }

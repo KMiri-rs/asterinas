@@ -160,3 +160,20 @@ macro_rules! miri_print {
         $crate::arch::miri::_miri_print(format_args!($($arg)*));
     }};
 }
+
+/// Inserts a TDX-specific code block.
+///
+/// The KMiri machine is an x86 machine without TDX, so this is the x86 macro
+/// (`arch/x86/mod.rs`) with `::tdx_guest::tdx_is_enabled()` fixed to `false`:
+/// the `else_block`, if any, is executed and the `if_block` never is. This is
+/// what a native x86 kernel does when the `cvm_guest` feature is enabled but
+/// TDX is not detected at runtime.
+#[macro_export]
+macro_rules! if_tdx_enabled {
+    // Match when there is an else block
+    ($if_block:block else $else_block:block) => {{ $else_block }};
+    // Match when there is no else block
+    ($if_block:block) => {{}};
+}
+
+pub use if_tdx_enabled;

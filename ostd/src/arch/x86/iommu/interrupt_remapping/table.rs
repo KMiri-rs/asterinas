@@ -22,7 +22,7 @@ enum ExtendedInterruptMode {
 struct IntRemappingMeta;
 crate::impl_untyped_frame_meta_for!(IntRemappingMeta);
 
-pub struct IntRemappingTable {
+pub(in crate::arch::iommu) struct IntRemappingTable {
     num_entries: u16,
     extended_interrupt_mode: ExtendedInterruptMode,
     segment: Segment<IntRemappingMeta>,
@@ -33,7 +33,7 @@ pub struct IntRemappingTable {
 }
 
 impl IntRemappingTable {
-    pub fn alloc(&'static self) -> Option<IrtEntryHandle> {
+    pub(super) fn alloc(&'static self) -> Option<IrtEntryHandle> {
         let index = self.allocator.lock().alloc()?;
         Some(IrtEntryHandle {
             index: index as u16,
@@ -113,7 +113,7 @@ impl IntRemappingTable {
 /// The type of validation that must be performed by the interrupt-remapping hardware.
 #[repr(u32)]
 #[derive(Debug, TryFromInt)]
-pub enum SourceValidationType {
+pub(super) enum SourceValidationType {
     /// No requester-id verification is required.
     Disable = 0b00,
     /// Verify requester-id in the interrupt request using the SID and SQ fields in the
@@ -130,7 +130,7 @@ pub enum SourceValidationType {
 /// is Set and the SVT field is 0b01.
 #[repr(u32)]
 #[derive(Debug, TryFromInt)]
-pub enum SourceIdQualifier {
+pub(super) enum SourceIdQualifier {
     /// Verify the interrupt request by comparing all 16 bits of the SID field with the
     /// 16-bit requester-id of the interrupt request.
     All = 0b00,
@@ -159,7 +159,7 @@ enum DeliveryMode {
 }
 
 /// Interrupt Remapping Table Entry (IRTE) for Remapped Interrupts.
-pub struct IrtEntry(u128);
+pub(super) struct IrtEntry(u128);
 
 impl IrtEntry {
     /// Creates an enabled entry with no validation,
@@ -173,17 +173,17 @@ impl IrtEntry {
         [self.0 as u64, (self.0 >> 64) as u64]
     }
 
-    pub fn source_validation_type(&self) -> SourceValidationType {
+    pub(super) fn source_validation_type(&self) -> SourceValidationType {
         const SVT_MASK: u128 = 0x3 << 82;
         SourceValidationType::try_from(((self.0 & SVT_MASK) >> 82) as u32).unwrap()
     }
 
-    pub fn source_id_qualifier(&self) -> SourceIdQualifier {
+    pub(super) fn source_id_qualifier(&self) -> SourceIdQualifier {
         const SQ_MASK: u128 = 0x3 << 82;
         SourceIdQualifier::try_from(((self.0 & SQ_MASK) >> 82) as u32).unwrap()
     }
 
-    pub const fn source_identifier(&self) -> u32 {
+    pub(super) const fn source_identifier(&self) -> u32 {
         const SID_MASK: u128 = 0xFFFF << 64;
         ((self.0 & SID_MASK) >> 64) as u32
     }
@@ -198,17 +198,17 @@ impl IrtEntry {
     ///     - 39:32 - Reserved (0)
     /// - Intel x2APIC Mode (IRTA_REG.EIME=1):
     ///     - 63:32 - APIC DestinationID\[31:0\]
-    pub const fn destination_id(&self) -> u32 {
+    pub(super) const fn destination_id(&self) -> u32 {
         const DST_MASK: u128 = 0xFFFF_FFFF << 32;
         ((self.0 & DST_MASK) >> 32) as u32
     }
 
-    pub const fn vector(&self) -> u8 {
+    pub(super) const fn vector(&self) -> u8 {
         const VECTOR_MASK: u128 = 0xFF << 16;
         ((self.0 & VECTOR_MASK) >> 16) as u8
     }
 
-    pub const fn flags(&self) -> IrtEntryFlags {
+    pub(super) const fn flags(&self) -> IrtEntryFlags {
         IrtEntryFlags::from_bits_truncate((self.0 & 0xFFFF_FFFF) as u32)
     }
 }
@@ -229,36 +229,37 @@ impl Debug for IrtEntry {
 
 bitflags! {
     /// Interrupt Remapping Table Entry Flags for Remapped Interrupts.
-    pub struct IrtEntryFlags: u32{
+    #[derive(Clone, Copy, Debug)]
+    pub struct IrtEntryFlags: u32 {
         /// Present bit
-        const P =           1 << 0;
+        const P   = 1 << 0;
         /// Fault Processing Disable. Enables or disables recording/reporting of faults
         /// caused by interrupt messages requests processed through this entry.
         ///
         /// - 0: Enabled
         /// - 1: Disabled
-        const FPD =         1 << 1;
+        const FPD = 1 << 1;
         /// Destination Mode, indicates the Destination ID in an IRTE should be interpreted
         /// as logical or physical APIC ID.
         ///
         /// - 0: Physical
         /// - 1: Logical
-        const DM =          1 << 2;
+        const DM  = 1 << 2;
         /// Redirection Hint, indicates whether the remapped interrupt request should be
         /// directed to one among N processors specified in Destination ID.
         ///
         /// - 0: The remapped interrupt is directed to the processor.
         /// - 1: The remapped interrupt is directed to 1 of N processors.
-        const RH =          1 << 3;
+        const RH  = 1 << 3;
         /// Trigger Mode.
         ///
         /// - 0: Edge sensitive
         /// - 1: Level sensitive
-        const TM =          1 << 4;
+        const TM  = 1 << 4;
         /// IRTE Mode.
         ///
         /// - 0: Remapped Mode.
         /// - 1: Posted Mode.
-        const IM =          1 << 15;
+        const IM  = 1 << 15;
     }
 }

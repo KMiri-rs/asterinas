@@ -28,7 +28,6 @@ use spin::Once;
 use crate::{
     syscall::ClockId,
     time::{
-        START_TIME, SystemTime,
         clocks::MonotonicClock,
         timer::{Timeout, TimerGuard},
     },
@@ -39,7 +38,6 @@ const CLOCK_TAI: usize = 11;
 const VDSO_BASES: usize = CLOCK_TAI + 1;
 const DEFAULT_CLOCK_MODE: VdsoClockMode = VdsoClockMode::Tsc;
 
-static START_SECS_COUNT: Once<u64> = Once::new();
 static VDSO: Once<Arc<Vdso>> = Once::new();
 
 #[derive(Clone, Copy, Debug)]
@@ -163,29 +161,36 @@ impl VdsoData {
     fn update_high_res_instant(&mut self, instant: Instant, instant_cycles: u64) {
         self.last_cycles = instant_cycles;
         for clock_id in HIGH_RES_CLOCK_IDS {
-            let secs = if clock_id == ClockId::CLOCK_REALTIME {
-                instant.secs() + START_SECS_COUNT.get().unwrap()
+            let (secs, nanos) = if clock_id == ClockId::CLOCK_REALTIME {
+                let base = Self::realtime_duration(instant);
+                (base.as_secs(), base.subsec_nanos() as u64)
             } else {
-                instant.secs()
+                (instant.secs(), instant.nanos() as u64)
             };
 
-            self.update_clock_instant(
-                clock_id as usize,
-                secs,
-                (instant.nanos() as u64) << self.shift as u64,
-            );
+            self.update_clock_instant(clock_id as usize, secs, nanos << (self.shift as u64));
         }
     }
 
     fn update_coarse_res_instant(&mut self, instant: Instant) {
         for clock_id in COARSE_RES_CLOCK_IDS {
-            let secs = if clock_id == ClockId::CLOCK_REALTIME_COARSE {
-                instant.secs() + START_SECS_COUNT.get().unwrap()
+            let (secs, nanos) = if clock_id == ClockId::CLOCK_REALTIME_COARSE {
+                let base = Self::realtime_duration(instant);
+                (base.as_secs(), base.subsec_nanos() as u64)
             } else {
-                instant.secs()
+                (instant.secs(), instant.nanos() as u64)
             };
-            self.update_clock_instant(clock_id as usize, secs, instant.nanos() as u64);
+            self.update_clock_instant(clock_id as usize, secs, nanos);
         }
+    }
+
+    fn realtime_duration(instant: Instant) -> Duration {
+        #[cfg(not(ktest))]
+        let start_offset = aster_time::read_start_time().since_epoch();
+        #[cfg(ktest)]
+        let start_offset = test::TEST_START_OFFSET;
+
+        start_offset + Duration::new(instant.secs(), instant.nanos())
     }
 }
 
@@ -226,13 +231,20 @@ const PREBUILT_VDSO_LIB: &[u8] =
 #[cfg(target_arch = "riscv64")]
 const PREBUILT_VDSO_LIB: &[u8] =
     include_bytes!(concat!(env!("VDSO_LIBRARY_DIR"), "/vdso_riscv64.so"));
+#[cfg(target_arch = "aarch64")]
+const PREBUILT_VDSO_LIB: &[u8] =
+    include_bytes!(concat!(env!("VDSO_LIBRARY_DIR"), "/vdso_aarch64.so"));
 
 /// The offset from the vDSO base to the `__vdso_rt_sigreturn` function.
 ///
 /// This constant is specific to the prebuilt vDSO library and can be obtained from
-/// `readelf -s vdso_riscv64.so | grep '__vdso_rt_sigreturn'`.
-#[cfg(target_arch = "riscv64")]
-pub(crate) const __VDSO_RT_SIGRETURN_OFFSET: usize = 0x5b0;
+/// `readelf -s vdso_riscv64.so | grep '__vdso_rt_sigreturn'` for RISC-V and
+/// `readelf -s vdso_aarch64.so | grep '__kernel_rt_sigreturn'` for ARM.
+#[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
+pub(crate) const __VDSO_RT_SIGRETURN_OFFSET: usize = cfg_select! {
+    target_arch = "riscv64" => 0x5b0,
+    target_arch = "aarch64" => 0x538,
+};
 
 impl Vdso {
     /// Constructs a new `Vdso`, including an initialized `VdsoData` and a VMO of the vDSO.
@@ -250,9 +262,12 @@ impl Vdso {
                 .unwrap();
 
             // Write vDSO library to vDSO VMO.
-            let mut reader =
-                VmReader::from(&PREBUILT_VDSO_LIB[..VDSO_VMO_LAYOUT.text_segment_size])
-                    .to_fallible();
+            let mut reader = VmReader::from(
+                &PREBUILT_VDSO_LIB[..VDSO_VMO_LAYOUT
+                    .text_segment_size
+                    .min(PREBUILT_VDSO_LIB.len())],
+            )
+            .to_fallible();
             vdso_vmo
                 .write(VDSO_VMO_LAYOUT.text_segment_offset, &mut reader)
                 .unwrap();
@@ -356,16 +371,6 @@ fn update_vdso_coarse_res_instant(_guard: TimerGuard) {
     VDSO.get().unwrap().update_coarse_res_instant(instant);
 }
 
-/// Initializes the time duration from 1970-01-01 00:00:00 to the start time.
-fn init_start_secs_count() {
-    let time_duration = START_TIME
-        .get()
-        .unwrap()
-        .duration_since(&SystemTime::UNIX_EPOCH)
-        .unwrap();
-    START_SECS_COUNT.call_once(|| time_duration.as_secs());
-}
-
 /// Initializes the vDSO singleton.
 fn init_vdso() {
     let vdso = Vdso::new();
@@ -373,7 +378,6 @@ fn init_vdso() {
 }
 
 pub(super) fn init_in_first_kthread() {
-    init_start_secs_count();
     init_vdso();
 
     aster_time::VDSO_DATA_HIGH_RES_UPDATE_FN.call_once(|| update_vdso_high_res_instant);
@@ -409,15 +413,18 @@ pub(crate) const VDSO_VMO_LAYOUT: VdsoVmoLayout = VdsoVmoLayout {
     size: 5 * PAGE_SIZE,
 };
 
-#[cfg(target_arch = "riscv64")]
+#[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
 pub(crate) const VDSO_VMO_LAYOUT: VdsoVmoLayout = VdsoVmoLayout {
     // https://elixir.bootlin.com/linux/v6.2.10/source/arch/riscv/kernel/vdso.c#L247
+    // https://elixir.bootlin.com/linux/v6.2.10/source/arch/arm64/kernel/vdso.c#L211
     data_segment_offset: 0,
     data_segment_size: PAGE_SIZE,
     // https://elixir.bootlin.com/linux/v6.2.10/source/arch/riscv/kernel/vdso.c#L256
+    // https://elixir.bootlin.com/linux/v6.2.10/source/arch/arm64/kernel/vdso.c#L222
     text_segment_offset: 2 * PAGE_SIZE,
     text_segment_size: PAGE_SIZE,
     // https://elixir.bootlin.com/linux/v6.2.10/source/arch/riscv/kernel/vdso.c#L47
+    // https://elixir.bootlin.com/linux/v6.2.10/source/arch/arm64/kernel/vdso.c#L73
     data_offset: 0,
 
     size: 3 * PAGE_SIZE,
@@ -454,3 +461,52 @@ const_assert!(
     VDSO_VMO_LAYOUT.data_offset + size_of::<VdsoData>()
         <= VDSO_VMO_LAYOUT.data_segment_offset + VDSO_VMO_LAYOUT.data_segment_size
 );
+
+#[cfg(ktest)]
+mod test {
+    use core::time::Duration;
+
+    use aster_time::Instant;
+    use aster_util::coeff::Coeff;
+    use ostd::prelude::*;
+
+    use super::VdsoData;
+    use crate::syscall::ClockId;
+
+    pub(super) const TEST_START_OFFSET: Duration = Duration::new(1_700_000_000, 800_000_000);
+
+    #[ktest]
+    fn realtime_duration_adds_fractional_seconds() {
+        let base = VdsoData::realtime_duration(Instant::new(5, 100_000_000));
+        assert_eq!(base, Duration::new(1_700_000_005, 900_000_000));
+
+        // The fractions carry into the seconds field.
+        let base = VdsoData::realtime_duration(Instant::new(5, 400_000_000));
+        assert_eq!(base, Duration::new(1_700_000_006, 200_000_000));
+    }
+
+    #[ktest]
+    fn realtime_clocks_store_fractional_seconds() {
+        let instant = Instant::new(5, 400_000_000);
+        let expected = TEST_START_OFFSET + Duration::new(instant.secs(), instant.nanos());
+
+        let coeff = Coeff::new(1_000_000_000, 1, 1_u64 << 20);
+        // A zero shift would make the high-resolution assertion below vacuous.
+        assert!(coeff.shift() > 0);
+
+        let mut data = VdsoData::empty();
+        data.set_coeff(&coeff);
+        data.update_high_res_instant(instant, 0);
+        data.update_coarse_res_instant(instant);
+
+        let coarse = data.basetime[ClockId::CLOCK_REALTIME_COARSE as usize];
+        let coarse_nanos = coarse.nanos_info;
+        assert_eq!(coarse.secs, expected.as_secs());
+        assert_eq!(coarse_nanos, expected.subsec_nanos() as u64);
+
+        let realtime = data.basetime[ClockId::CLOCK_REALTIME as usize];
+        let realtime_nanos = realtime.nanos_info >> coeff.shift();
+        assert_eq!(realtime.secs, expected.as_secs());
+        assert_eq!(realtime_nanos, expected.subsec_nanos() as u64);
+    }
+}

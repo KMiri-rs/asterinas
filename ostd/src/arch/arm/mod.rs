@@ -11,7 +11,7 @@ pub(crate) mod io;
 pub(crate) mod iommu;
 pub mod irq;
 pub(crate) mod mm;
-mod power;
+pub mod power;
 pub mod serial;
 pub(crate) mod task;
 mod timer;
@@ -38,7 +38,11 @@ pub(crate) unsafe fn late_init_on_bsp() {
 
     // SAFETY: The caller ensures that this function is only called once on BSP,
     // after the kernel page table is activated.
-    let io_mem_builder = unsafe { io::construct_io_mem_allocator_builder() };
+    let mut io_mem_builder = unsafe { io::construct_io_mem_allocator_builder() };
+
+    irq::chip::init(&mut io_mem_builder);
+
+    timer::init();
 
     // SAFETY: We're on the BSP and we're ready to boot all APs.
     unsafe { crate::boot::smp::boot_all_aps() };
@@ -103,6 +107,20 @@ pub(crate) fn enable_cpu_features() {
         asm!(
             "mov {tmp}, #(3 << 20)",
             "msr cpacr_el1, {tmp}",
+            "isb",
+            tmp = out(reg) _,
+        );
+    }
+
+    // SAFETY: It is safe to enable EL0 access to the frequency register and virtual
+    // counter registers, as reading them does not affect the kernel's memory safety.
+    unsafe {
+        // Counter-timer Kernel Control Register (CNTKCTL).
+        // EL0VCTEN, bit [1] = 1: This control does not cause EL0 accesses to the
+        // frequency register and virtual counter registers to be trapped.
+        asm!(
+            "mov {tmp}, #(1 << 1)",
+            "msr cntkctl_el1, {tmp}",
             "isb",
             tmp = out(reg) _,
         );

@@ -10,7 +10,7 @@ jobs:
   xfstests-full:
     runs-on: ubuntu-4-cores-150GB-ssd
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: --device=/dev/kvm --privileged
     timeout-minutes: 90
     steps:
@@ -25,3 +25,5 @@ jobs:
           xfstests_fs_type: 'ext2'
           xfstests_runlist: 'full.list'
           xfstests_disk_size: '12G'
+          restore_osdk_from_cache: true
+          restore_kernel_from_cache: true

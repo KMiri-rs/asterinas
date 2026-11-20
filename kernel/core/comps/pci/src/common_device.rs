@@ -2,10 +2,8 @@
 
 //! PCI device common definitions or functions.
 
-use ostd::Result;
-
 use crate::{
-    capability::{RawCapabilities, msix::CapabilityMsixData, vendor::CapabilityVndrData},
+    capability::{RawCapabilities, msix::RawCapabilityMsix, vendor::CapabilityVndrData},
     cfg_space::{AddrLen, Bar, Command, PciBridgeCfgOffset, PciCommonCfgOffset, Status},
     device_info::{PciDeviceId, PciDeviceLocation},
 };
@@ -38,11 +36,6 @@ impl PciCommonDevice {
         &self.bar_manager
     }
 
-    /// Returns a mutable reference to the PCI Base Address Register (BAR) manager.
-    pub fn bar_manager_mut(&mut self) -> &mut BarManager {
-        &mut self.bar_manager
-    }
-
     /// Returns the PCI device type.
     pub fn device_type(&self) -> PciDeviceType {
         self.header_type.device_type()
@@ -69,29 +62,14 @@ impl PciCommonDevice {
         Status::from_bits_truncate(self.location.read16(PciCommonCfgOffset::Status as u16))
     }
 
-    /// Acquires necessary resources to build the MSI-X capability data, if the capability exists.
-    ///
-    /// Note that the MSI-X capability data occupies some memory BARs. Therefore, it will fail if
-    /// the necessary resources are not available.
-    pub fn acquire_msix_capability(&mut self) -> Result<Option<CapabilityMsixData>> {
-        self.capabilities
-            .acquire_msix_data(&self.location, &mut self.bar_manager)
+    /// Returns the raw MSI-X capability, if present.
+    pub(crate) fn raw_msix_capability(&self) -> Option<&RawCapabilityMsix> {
+        self.capabilities.msix()
     }
 
     /// Gets access to the vendor-specific capability data.
-    pub fn iter_vndr_capability(&self) -> impl Iterator<Item = CapabilityVndrData> {
-        self.capabilities.iter_vndr_data(&self.location)
-    }
-
-    /// Gets access to the vendor-specific capability data with a mutable reference to the BAR
-    /// manager.
-    pub fn iter_vndr_capability_with_bar_manager(
-        &mut self,
-    ) -> (impl Iterator<Item = CapabilityVndrData>, &mut BarManager) {
-        (
-            self.capabilities.iter_vndr_data(&self.location),
-            &mut self.bar_manager,
-        )
+    pub fn iter_vndr_capability(&self) -> impl Iterator<Item = CapabilityVndrData<'_>> {
+        self.capabilities.iter_vndr_data(self)
     }
 
     pub(super) fn new(location: PciDeviceLocation) -> Option<Self> {
@@ -156,7 +134,7 @@ impl PciHeaderType {
     /// According to the PCI specification, the encoding of a header type is as follows:
     /// - Bit 0-6 encodes the raw value of `PciDeviceType`;
     /// - Bit 7 indicates whether the PCI device has multiple functions.
-    pub fn try_from_raw(raw: u8) -> Option<Self> {
+    fn try_from_raw(raw: u8) -> Option<Self> {
         let device_type = PciDeviceType::try_from_raw(raw & 0x7F)?;
         let has_multi_funcs = (raw & 0x80) != 0;
 
@@ -167,12 +145,12 @@ impl PciHeaderType {
     }
 
     /// Returns the device type.
-    pub fn device_type(self) -> PciDeviceType {
+    fn device_type(self) -> PciDeviceType {
         self.device_type
     }
 
     /// Returns whether the device has multiple functions.
-    pub fn has_multi_funcs(self) -> bool {
+    fn has_multi_funcs(self) -> bool {
         self.has_multi_funcs
     }
 }
@@ -215,11 +193,6 @@ impl BarManager {
     /// Gains access to the BAR space and returns `None` if that BAR is absent.
     pub fn bar(&self, idx: u8) -> Option<&Bar> {
         self.bars[idx as usize].as_ref()
-    }
-
-    /// Gains mutable access to the BAR space and returns `None` if that BAR is absent.
-    pub fn bar_mut(&mut self, idx: u8) -> Option<&mut Bar> {
-        self.bars[idx as usize].as_mut()
     }
 
     /// Parses the BAR space by PCI device location.

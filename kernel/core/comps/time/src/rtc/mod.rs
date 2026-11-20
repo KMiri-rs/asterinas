@@ -5,10 +5,9 @@ use alloc::sync::Arc;
 use crate::SystemTime;
 
 /// Generic interface for RTC drivers.
-pub trait Driver {
+pub(crate) trait Driver {
     /// Creates a RTC driver.
     /// Returns [`Some<Self>`] on success, [`None`] otherwise (e.g. platform unsupported).
-    #[cfg_attr(target_arch = "aarch64", expect(dead_code))]
     fn try_new() -> Option<Self>
     where
         Self: Sized;
@@ -19,7 +18,7 @@ pub trait Driver {
 
 macro_rules! declare_rtc_drivers {
     ( $( #[cfg $cfg:tt ] $module:ident :: $name:ident),* $(,)? ) => {
-        pub fn init_rtc_driver() -> Arc<dyn Driver + Send + Sync> {
+        pub(super) fn init_rtc_driver() -> Arc<dyn Driver + Send + Sync> {
             // Iterate all possible drivers and pick one that can be initialized.
             $(
                 #[cfg $cfg]
@@ -39,13 +38,21 @@ macro_rules! declare_rtc_drivers {
 mod cmos;
 #[cfg(target_arch = "riscv64")]
 mod goldfish;
+#[cfg(target_arch = "x86_64")]
+mod kvmclock;
 #[cfg(target_arch = "loongarch64")]
 mod loongson;
+#[cfg(target_arch = "aarch64")]
+mod pl031;
 
 declare_rtc_drivers! {
+    // Prefers the KVM wall clock over CMOS on x86_64. This matches Linux.
+    // Reference: <https://elixir.bootlin.com/linux/v7.0/source/arch/x86/kernel/kvmclock.c#L326>.
+    #[cfg(target_arch = "x86_64")] kvmclock::RtcKvmClock,
     #[cfg(target_arch = "x86_64")] cmos::RtcCmos,
     #[cfg(target_arch = "riscv64")] goldfish::RtcGoldfish,
     #[cfg(target_arch = "loongarch64")] loongson::RtcLoongson,
+    #[cfg(target_arch = "aarch64")] pl031::RtcPl031,
 }
 
 struct RtcDummy;
@@ -56,14 +63,6 @@ impl Driver for RtcDummy {
     }
 
     fn read_rtc(&self) -> SystemTime {
-        SystemTime {
-            year: 1970,
-            month: 1,
-            day: 1,
-            hour: 0,
-            minute: 0,
-            second: 0,
-            nanos: 0,
-        }
+        SystemTime::UNIX_EPOCH
     }
 }

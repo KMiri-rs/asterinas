@@ -1,7 +1,7 @@
 // Create a new mount
 mount(
     source, target, filesystemtype,
-    mountflags = 0,
+    mountflags = MS_NODEV | MS_NOEXEC | MS_NOSYMFOLLOW,
     data
 );
 
@@ -16,5 +16,12 @@ mount(
 mount(
     source, target, filesystemtype,
     mountflags = MS_BIND | MS_REC,
+    data
+);
+
+// Changes the propagation type of the mount
+mount(
+    source, target, filesystemtype,
+    mountflags = MS_PRIVATE | MS_SLAVE | MS_SHARED | MS_UNBINDABLE | MS_REC,
     data
 );

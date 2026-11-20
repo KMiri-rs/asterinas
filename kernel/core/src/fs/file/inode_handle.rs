@@ -5,8 +5,8 @@
 use core::fmt::Display;
 
 use super::{
-    AccessMode, CreationFlags, FileCommon, FileLike, InodeType, Mappable, SettableStatusFlags,
-    StatusFlags, SyncMode, file_table::FdFlags, flock::FlockItem,
+    AccessMode, CreationFlags, FileCommon, FileLike, InodeType, MappableObject,
+    SettableStatusFlags, StatusFlags, SyncMode, file_table::FdFlags, flock::FlockItem,
 };
 use crate::{
     events::IoEvents,
@@ -15,7 +15,7 @@ use crate::{
         vfs::{
             inode::{FallocMode, FileOps},
             inode_ext::InodeExt,
-            path::Path,
+            path::{Path, PerMountFlags},
             range_lock::{RangeLockItem, RangeLockOwner, RangeLockType},
             xattr::clear_file_priv,
         },
@@ -23,6 +23,7 @@ use crate::{
     prelude::*,
     process::signal::{PollHandle, Pollable},
     util::ioctl::RawIoctl,
+    vm::vmar::FileMmapRequest,
 };
 
 pub(crate) struct InodeHandle {
@@ -64,13 +65,22 @@ impl InodeHandle {
         status_flags: StatusFlags,
     ) -> Result<Self> {
         let inode = path.inode();
+        let inode_type = inode.type_();
         let open_file = if status_flags.contains(StatusFlags::O_PATH) {
             // The file is opened with `O_PATH`. We follow Linux to report `O_RDONLY` here (e.g.,
             // in `/proc/[pid]/fdinfo/[n]`).
             access_mode = AccessMode::O_RDONLY;
             None
-        } else if inode.type_() == InodeType::Dir && access_mode.is_writable() {
+        } else if inode_type.is_device() && path.mount_node().flags().contains(PerMountFlags::NODEV)
+        {
+            return_errno_with_message!(
+                Errno::EACCES,
+                "the device special file is on a file system mounted with `nodev`"
+            );
+        } else if inode_type.is_directory() && access_mode.is_writable() {
             return_errno_with_message!(Errno::EISDIR, "a directory cannot be opened writable");
+        } else if inode.type_() == InodeType::Socket {
+            return_errno_with_message!(Errno::ENXIO, "a socket cannot be opened as a file");
         } else {
             inode
                 .open(path.dentry(), access_mode, status_flags)
@@ -374,20 +384,20 @@ impl FileLike for InodeHandle {
         return_errno_with_message!(Errno::ENOTTY, "ioctl is not supported");
     }
 
-    fn mappable(&self) -> Result<Mappable> {
-        if self.status_flags().contains(StatusFlags::O_PATH) {
-            return_errno_with_message!(Errno::EBADF, "the file is opened as a path");
+    fn mappable(&self, request: FileMmapRequest) -> Result<MappableObject<'_>> {
+        // The `O_PATH` flag and access mode have already been checked in the syscall layer.
+
+        if let Some(ref open_file) = self.open_file {
+            // If the file is a special file (e.g., device file), we should
+            // return the file-specific mappable object.
+            return open_file.mappable(request);
         }
 
         let inode = self.path().inode();
         if let Some(page_cache) = inode.page_cache() {
-            // If the inode has a page cache, it is a file-backed mapping and
-            // we return the VMO as the mappable object.
-            Ok(Mappable::Vmo(page_cache))
-        } else if let Some(ref open_file) = self.open_file {
-            // Otherwise, it is a special file (e.g. device file) and we should
-            // return the file-specific mappable object.
-            open_file.mappable()
+            // Otherwise, if the inode has a page cache, it is a file-backed
+            // mapping and we return the VMO as the mappable object.
+            Ok(MappableObject::Vmo(page_cache))
         } else {
             return_errno_with_message!(Errno::ENODEV, "the file is not mappable");
         }
@@ -475,15 +485,6 @@ impl FileLike for InodeHandle {
                 "the flags do not work on the append-only file"
             );
         }
-        if status_flags.contains(StatusFlags::O_DIRECT)
-            || status_flags.contains(StatusFlags::O_PATH)
-        {
-            return_errno_with_message!(
-                Errno::EBADF,
-                "currently fallocate file with O_DIRECT or O_PATH is not supported"
-            );
-        }
-
         clear_file_priv(dentry)?;
         inode.fallocate(mode, offset, len)
     }
@@ -593,7 +594,7 @@ pub trait PerOpenFileOps: Pollable + FileOps + Any + Send + Sync + 'static {
     }
 
     // See `FileLike::mappable`.
-    fn mappable(&self) -> Result<Mappable> {
+    fn mappable(&self, _request: FileMmapRequest) -> Result<MappableObject<'_>> {
         return_errno_with_message!(Errno::EINVAL, "the file is not mappable");
     }
 

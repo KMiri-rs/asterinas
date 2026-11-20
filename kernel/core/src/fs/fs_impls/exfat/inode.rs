@@ -40,6 +40,7 @@ use crate::{
     },
     prelude::*,
     process::{Gid, Uid},
+    util::ReadWithLen,
     vm::page_cache::{BlockAsPageCacheBackend, PageCache, Vmo},
 };
 
@@ -47,7 +48,8 @@ use crate::{
 pub(crate) type Ino = u64;
 
 bitflags! {
-    pub(crate) struct FatAttr : u16{
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) struct FatAttr: u16 {
         /// This inode is read only.
         const READONLY  = 0x0001;
         /// This inode is hidden. This attribute is not supported in our implementation.
@@ -651,7 +653,7 @@ impl ExfatInode {
             let end = file_size.min(offset + writer.avail());
             (start, end - start)
         };
-        inner.page_cache.read(read_off, writer)?;
+        inner.page_cache.read_with_len(read_off, writer, read_len)?;
 
         inner.upgrade().update_atime()?;
         Ok(read_len)
@@ -717,6 +719,10 @@ impl ExfatInode {
                 return_errno!(Errno::EISDIR)
             }
 
+            if write_len == 0 {
+                return Ok(0);
+            }
+
             let file_size = inner.size;
             let file_allocated_size = inner.size_allocated;
             let new_size = offset + write_len;
@@ -760,6 +766,9 @@ impl ExfatInode {
         let inner = self.inner.upread();
         if inner.inode_type.is_directory() {
             return_errno!(Errno::EISDIR)
+        }
+        if write_len == 0 {
+            return Ok(0);
         }
         if !is_block_aligned(offset) || !is_block_aligned(write_len) {
             return_errno_with_message!(Errno::EINVAL, "not block-aligned");
@@ -1147,9 +1156,6 @@ impl ExfatInode {
         mode: InodeMode,
         fs_guard: &MutexGuard<()>,
     ) -> Result<Arc<ExfatInode>> {
-        if name.len() > MAX_NAME_LENGTH {
-            return_errno!(Errno::ENAMETOOLONG)
-        }
         let fs = self.inner.read().fs();
 
         // TODO: remove trailing periods of pathname.
@@ -1573,9 +1579,6 @@ impl Inode for ExfatInode {
             if !inner.inode_type.is_directory() {
                 return_errno!(Errno::ENOTDIR)
             }
-            if name.len() > MAX_NAME_LENGTH {
-                return_errno!(Errno::ENAMETOOLONG)
-            }
 
             if inner.lookup_by_name(name, false, &fs_guard).is_ok() {
                 return_errno!(Errno::EEXIST)
@@ -1670,10 +1673,6 @@ impl Inode for ExfatInode {
         let inner = self.inner.upread();
         if !inner.inode_type.is_directory() {
             return_errno!(Errno::ENOTDIR)
-        }
-
-        if name.len() > MAX_NAME_LENGTH {
-            return_errno!(Errno::ENAMETOOLONG)
         }
 
         let inode = {

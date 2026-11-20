@@ -46,6 +46,7 @@ pub(super) fn on_first_process_startup(ctx: &Context) {
 }
 
 fn init() {
+    crate::power::init();
     crate::arch::init();
     crate::thread::init();
     crate::util::random::init();
@@ -268,7 +269,7 @@ fn init_in_first_kthread(path_resolver: &PathResolver) {
     crate::fs::init_in_first_kthread(path_resolver);
     crate::device::init_in_first_kthread();
     crate::net::init_in_first_kthread();
-    #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
+    #[cfg(not(target_arch = "loongarch64"))]
     crate::vdso::init_in_first_kthread();
 }
 

@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - distro/**
+      - flake.lock
       - .github/workflows/test_iso_image.yml
       - tools/nixos/**
   push:
@@ -12,14 +13,19 @@ on:
       - main
     paths:
       - distro/**
+      - flake.lock
       - .github/workflows/test_iso_image.yml
       - tools/nixos/**
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   iso-test:
     runs-on: ubuntu-4-cores-150GB-ssd
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
     timeout-minutes: 60
     steps:

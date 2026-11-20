@@ -5,16 +5,16 @@ use core::fmt::Debug;
 use bitflags::bitflags;
 
 /// Capability in IOMMU.
-pub struct Capability(u64);
+pub(in crate::arch::iommu) struct Capability(u64);
 
 impl Capability {
     /// Create Capability from `value`
-    pub const fn new(value: u64) -> Self {
+    pub(in crate::arch::iommu) const fn new(value: u64) -> Self {
         Self(value)
     }
 
     /// Capability flags
-    pub const fn flags(&self) -> CapabilityFlags {
+    const fn flags(&self) -> CapabilityFlags {
         CapabilityFlags::from_bits_truncate(self.0)
     }
 
@@ -23,7 +23,7 @@ impl Capability {
     ///
     /// Number of fault recording registers is computed as N+1, where N is the value
     /// reported in this field.
-    pub const fn fault_recording_number(&self) -> u64 {
+    pub(in crate::arch::iommu) const fn fault_recording_number(&self) -> u64 {
         const NFR_MASK: u64 = 0xFF << 40;
         (self.0 & NFR_MASK) >> 40
     }
@@ -31,7 +31,7 @@ impl Capability {
     /// Maximum Address Mask Value, indicates the maximum supported value for them Address
     /// Mask (AM) field in the Invalidation Address register (IVA_REG), and IOTLB Invalidation
     /// Descriptor (iotlb_inv_dsc) used for invalidations of second-stage translation.
-    pub const fn maximum_address_mask_value(&self) -> u64 {
+    const fn maximum_address_mask_value(&self) -> u64 {
         const MAMV_MASK: u64 = 0x3F << 48;
         (self.0 & MAMV_MASK) >> 48
     }
@@ -48,13 +48,15 @@ impl Capability {
     /// 6 => 16-bit domain-ids with support for up to 64K domains.
     /// 7 => Reserved.
     /// ```
-    pub const fn domain_support_number(&self) -> u64 {
+    const fn domain_support_number(&self) -> u64 {
         const ND_MASK: u64 = 0x7;
         self.0 & ND_MASK
     }
 
     /// Supported Adjusted Guest Address Widths.
-    pub const fn supported_adjusted_guest_address_widths(&self) -> CapabilitySagaw {
+    pub(in crate::arch::iommu) const fn supported_adjusted_guest_address_widths(
+        &self,
+    ) -> CapabilitySagaw {
         CapabilitySagaw::from_bits_truncate(self.0 >> 8)
     }
 
@@ -63,20 +65,20 @@ impl Capability {
     ///
     /// If the register base address is X, and the value reported in this field
     /// is Y, the address for the first fault recording register is calculated as X+(16*Y).
-    pub const fn fault_recording_register_offset(&self) -> u64 {
+    pub(in crate::arch::iommu) const fn fault_recording_register_offset(&self) -> u64 {
         const FRO_MASK: u64 = 0x3FF << 24;
         (self.0 & FRO_MASK) >> 24
     }
 
     /// Second Stage Large Page Support.
-    pub const fn second_stage_large_page_support(&self) -> CapabilitySslps {
+    const fn second_stage_large_page_support(&self) -> CapabilitySslps {
         CapabilitySslps::from_bits_truncate(self.0 >> 34)
     }
 
     /// Maximum Guest Address Width. The maximum guest physical address width supported
     /// by second-stage translation in remapping hardware.
     /// MGAW is computed as (N+1), where N is the valued reported in this field.
-    pub const fn maximum_guest_address_width(&self) -> u64 {
+    const fn maximum_guest_address_width(&self) -> u64 {
         const MGAW_MASK: u64 = 0x3F << 16;
         (self.0 & MGAW_MASK) >> 16
     }
@@ -115,42 +117,44 @@ impl Debug for Capability {
 
 bitflags! {
     /// Capability flags in IOMMU.
+    #[derive(Clone, Copy, Debug)]
     pub struct CapabilityFlags: u64 {
         /// Required Write-Buffer Flushing.
-        const RWBF =        1 << 4;
+        const RWBF    = 1 << 4;
         /// Protected Low-Memory Region
-        const PLMR =        1 << 5;
+        const PLMR    = 1 << 5;
         /// Protected High-Memory Region
-        const PHMR =        1 << 6;
+        const PHMR    = 1 << 6;
         /// Caching Mode
-        const CM =          1 << 7;
+        const CM      = 1 << 7;
         /// Zero Length Read. Whether the remapping hardware unit supports zero length DMA
         /// read requests to write-only pages.
-        const ZLR =         1 << 22;
+        const ZLR     = 1 << 22;
         /// Page Selective Invalidation. Whether hardware supports page-selective invalidation
         /// for IOTLB.
-        const PSI =         1 << 39;
+        const PSI     = 1 << 39;
         /// Write Draining.
-        const DWD =         1 << 54;
+        const DWD     = 1 << 54;
         /// Read Draining.
-        const DRD =         1 << 55;
+        const DRD     = 1 << 55;
         /// First Stage 1-GByte Page Support.
-        const FS1GP =       1 << 56;
+        const FS1GP   = 1 << 56;
         /// Posted Interrupts Support.
-        const PI =          1 << 59;
+        const PI      = 1 << 59;
         /// First Stage 5-level Paging Support.
-        const FS5LP =       1 << 60;
+        const FS5LP   = 1 << 60;
         /// Enhanced Command Support.
-        const ECMDS =       1 << 61;
+        const ECMDS   = 1 << 61;
         /// Enhanced Set Interrupt Remap Table Pointer Support.
-        const ESIRTPS =     1 << 62;
+        const ESIRTPS = 1 << 62;
         /// Enhanced Set Root Table Pointer Support.
-        const ESRTPS =      1 << 63;
+        const ESRTPS  = 1 << 63;
     }
 }
 
 bitflags! {
     /// Supported Adjusted Guest Address Widths (SAGAW) in IOMMU.
+    #[derive(Clone, Copy, Debug)]
     pub struct CapabilitySagaw: u64 {
         /// 39-bit AGAW (3-level page-table).
         const AGAW_39BIT_3LP = 1 << 1;
@@ -164,6 +168,7 @@ bitflags! {
 
 bitflags! {
     /// Second Stage Large Page Support (SSLPS) in IOMMU.
+    #[derive(Clone, Copy, Debug)]
     pub struct CapabilitySslps: u64 {
         /// 21-bit offset to page frame (2MB).
         const PAGE_21BIT_2MB = 1 << 0;

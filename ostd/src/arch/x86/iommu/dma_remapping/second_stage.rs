@@ -11,7 +11,7 @@ use crate::mm::{
 /// The page table used by iommu maps the device address
 /// space to the physical address space.
 #[derive(Clone, Debug)]
-pub struct IommuPtConfig {}
+pub(crate) struct IommuPtConfig {}
 
 // SAFETY: `item_raw_info`, `item_into_raw`, `item_from_raw`, and
 // `item_ref_from_raw` are correctly implemented with respect to the `Item` and
@@ -61,40 +61,39 @@ impl PagingConstsTrait for PagingConsts {
 }
 
 bitflags::bitflags! {
-    #[repr(C)]
-    #[derive(Pod)]
+    #[derive(Clone, Copy, Debug)]
     pub struct PteFlags: usize {
         /// Whether accesses to this page must snoop processor caches.
-        const SNOOP =           1 << 11;
+        const SNOOP      = 1 << 11;
 
         /// Bits ignored by hardware.
-        const IGN2 =            1 << 9;
-        const IGN1 =            1 << 8;
+        const IGN2       = 1 << 9;
+        const IGN1       = 1 << 8;
 
         /// Whether this page table entry is the last entry.
-        const LAST_PAGE =       1 << 7;
+        const LAST_PAGE  = 1 << 7;
 
         /// Ignore PAT, 1 if the scalable-mode PASID-table entry is not
         /// used for effective memory-type determination.
-        const IGNORE_PAT =      1 << 6;
+        const IGNORE_PAT = 1 << 6;
 
         /// Extended Memory Type, ignored by hardware when the
         /// Extended Memory Type Enable (EMTE) field is Clear.
         ///
         /// When the EMTE field is Set, this field is used to compute effective
         /// memory-type for second-stage-only and nested translations.
-        const EMT =             7 << 3;
+        const EMT        = 7 << 3;
 
-        const WRITABLE =        1 << 1;
+        const WRITABLE   = 1 << 1;
 
-        const READABLE =        1 << 0;
+        const READABLE   = 1 << 0;
 
     }
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod)]
-pub struct PageTableEntry(usize);
+pub(crate) struct PageTableEntry(usize);
 
 /// Parses a bit-flag bits `val` in the representation of `from` to `to` in bits.
 macro_rules! parse_flags {

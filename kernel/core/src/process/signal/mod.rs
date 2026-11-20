@@ -430,7 +430,7 @@ pub(crate) fn handle_user_signal(
         restorer_addr
     } else {
         cfg_select! {
-            target_arch = "riscv64" => {
+            any(target_arch = "riscv64", target_arch = "aarch64") => {
                 ctx.user_space().vmar().process_vm().vdso_base()
                     + crate::vdso::__VDSO_RT_SIGRETURN_OFFSET
             }
@@ -479,7 +479,7 @@ pub(crate) fn handle_user_signal(
             const X86_RFLAGS_DF: usize = 1 << 10; // Bit 10 is the DF flag.
             user_ctx.set_rflags(user_ctx.rflags() & !X86_RFLAGS_DF);
         }
-        _ => {},
+        _ => {}
     }
 
     Ok(())

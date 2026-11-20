@@ -28,12 +28,13 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct VirtioMmioDevice {
+pub(super) struct VirtioMmioDevice {
     device_id: u32,
 }
 
 #[derive(Debug)]
-pub struct VirtioMmioTransport {
+pub(crate) struct VirtioMmioTransport {
+    device_type: VirtioDeviceType,
     layout: SafePtr<VirtioMmioLayout, IoMem>,
     device: Arc<VirtioMmioDevice>,
     common_device: MmioCommonDevice,
@@ -57,10 +58,22 @@ impl VirtioMmioTransport {
         &self.device
     }
 
-    pub(super) fn new(device: MmioCommonDevice) -> Self {
+    pub(super) fn new(
+        device: MmioCommonDevice,
+    ) -> Result<Self, (aster_device::common::Error, MmioCommonDevice)> {
+        let device_id = device.read_device_id().unwrap();
+        let device_type = match u8::try_from(device_id)
+            .ok()
+            .and_then(|id| VirtioDeviceType::try_from(id).ok())
+        {
+            Some(device_type) => device_type,
+            None => {
+                warn!("Unrecognized virtio-mmio device ID: {:#x}", device_id);
+                return Err((aster_device::common::Error::ProbeFailed, device));
+            }
+        };
         let irq = device.irq().clone();
         let layout = SafePtr::new(device.io_mem().clone(), 0);
-        let device_id = device.read_device_id().unwrap();
         let (interrupt_ack, interrupt_status) = {
             let interrupt_ack_offset = offset_of!(VirtioMmioLayout, interrupt_ack);
             let interrupt_status_offset = offset_of!(VirtioMmioLayout, interrupt_status);
@@ -74,6 +87,7 @@ impl VirtioMmioTransport {
             )
         };
         let device = Self {
+            device_type,
             layout,
             device: Arc::new(VirtioMmioDevice { device_id }),
             common_device: device,
@@ -84,13 +98,13 @@ impl VirtioMmioTransport {
                 .write_once(&(PAGE_SIZE as u32))
                 .unwrap();
         }
-        device
+        Ok(device)
     }
 }
 
 impl VirtioTransport for VirtioMmioTransport {
     fn device_type(&self) -> VirtioDeviceType {
-        VirtioDeviceType::try_from(self.device.device_id() as u8).unwrap()
+        self.device_type
     }
 
     fn set_queue(
@@ -283,7 +297,7 @@ impl VirtioTransport for VirtioMmioTransport {
         if single_interrupt {
             warn!(
                 "{:?}: `single_interrupt` ignored: no support for virtio-mmio devices",
-                self.device_type()
+                self.device_type
             );
         }
         self.multiplex.write().register_queue_callback(func);

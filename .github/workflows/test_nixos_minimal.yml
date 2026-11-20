@@ -12,6 +12,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   minimal-nixos-test:
     runs-on: ubuntu-latest
@@ -36,8 +40,12 @@ jobs:
         timeout-minutes: 30
         uses: maus007/docker-run-action-fork@v1
         with:
-          image: asterinas/kernel-dev:0.18.1-20260918
+          image: asterinas/kernel-dev:0.19.0-20261012
           options: --privileged -v /dev:/dev -v ${{ github.workspace }}:/root/asterinas
+          # `docker-run-action-fork` joins these lines with ';' and runs them via
+          # `sh -c` without fail-fast settings, unlike a normal `run:` step.
+          # So we have to do `set -e` explicitly here.
           run: |
+            set -e
             make nixos NIXOS_TEST_SUITE=hello NIXOS_DISK_SIZE_IN_MB=6144
             make run_nixos NIXOS_TEST_SUITE=hello

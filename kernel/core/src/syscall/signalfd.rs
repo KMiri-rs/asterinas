@@ -9,15 +9,17 @@
 use core::{fmt::Display, sync::atomic::Ordering};
 
 use bitflags::bitflags;
-use ostd::mm::VmIo;
 
-use super::SyscallReturn;
+use super::{
+    SyscallReturn,
+    rt_sigprocmask::{RequireFullSize, UserSigSetPtr},
+};
 use crate::{
     events::IoEvents,
     fs::{
         file::{
             AccessMode, CreationFlags, FileCommon, FileLike, StatusFlags,
-            file_table::{FdFlags, RawFileDesc, get_file_fast},
+            file_table::{FdFlags, FileTableInsert, RawFileDesc, get_file_fast},
         },
         pseudofs::AnonInodeFs,
     },
@@ -56,11 +58,12 @@ pub(super) fn sys_signalfd4(
         raw_fd, mask_ptr, sizemask, flags
     );
 
-    if sizemask != size_of::<SigMask>() {
-        return_errno_with_message!(Errno::EINVAL, "invalid mask size");
-    }
-
-    let mut mask = ctx.user_space().read_val::<SigMask>(mask_ptr)?;
+    let user_space = ctx.user_space();
+    let sigmask_ptr = {
+        let size_policy = RequireFullSize::new(sizemask)?;
+        UserSigSetPtr::new(&user_space, mask_ptr, size_policy)
+    };
+    let mut mask = sigmask_ptr.read_val()?;
     mask -= SIGKILL;
     mask -= SIGSTOP;
 
@@ -96,7 +99,7 @@ fn create_new_signalfd(
     };
 
     let file_table = ctx.thread_local.borrow_file_table();
-    let fd = file_table.unwrap().write().insert(signal_file, fd_flags);
+    let fd = file_table.lock_and_insert(signal_file, fd_flags)?;
     Ok(fd.into())
 }
 
@@ -119,8 +122,9 @@ fn update_existing_signalfd(
 
 bitflags! {
     /// Signal file descriptor creation flags.
+    #[derive(Clone, Copy, Debug)]
     struct SignalFileFlags: u32 {
-        const O_CLOEXEC = CreationFlags::O_CLOEXEC.bits();
+        const O_CLOEXEC  = CreationFlags::O_CLOEXEC.bits();
         const O_NONBLOCK = StatusFlags::O_NONBLOCK.bits();
     }
 }

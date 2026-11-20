@@ -27,11 +27,19 @@ update_package_version() {
     sed -i "0,/${pattern}/s/${pattern}/version = \"${new_version}\"/1" $1
 }
 
-# Update the version of the $2 dependency (`$2 = { version = "", ...`) in file $1
+# Update the version of the $2 dependency in a single-line inline table in file $1.
 update_dep_version() {
-    echo "Updating the version of $2 in file $1"
-    pattern="^$2 = { version = \"[[:digit:]]\+\.[[:digit:]]\+\.[[:digit:]]\+\""
-    sed -i "0,/${pattern}/s/${pattern}/$2 = { version = \"${new_version}\"/1" $1
+    local file="$1" dependency="$2"
+    local dep_pattern="^[[:space:]]*${dependency}[[:space:]]*=[[:space:]]*\\{"
+    local version_pattern='([,{][[:space:]]*version[[:space:]]*=[[:space:]]*")[0-9]+\.[0-9]+\.[0-9]+(")'
+
+    if ! sed -nE "/${dep_pattern}/p" "$file" | grep -Eq "$version_pattern"; then
+        echo "Error: Cannot find version for ${dependency} in ${file}" >&2
+        return 1
+    fi
+
+    echo "Updating the version of ${dependency} in file ${file}"
+    sed -Ei "/${dep_pattern}/s/${version_pattern}/\\1${new_version}\\2/" "$file"
 }
 
 # Update Docker image versions in file $1
@@ -126,12 +134,15 @@ update_all_docker_version_refs() {
     update_image_versions ${ASTER_SRC_DIR}/.devcontainer/devcontainer.json
     update_image_versions ${ASTER_SRC_DIR}/README.md
     update_image_versions ${ASTER_SRC_DIR}/AGENTS.md
-    update_image_versions ${SCRIPT_DIR}/docker/README.md
+    update_image_versions ${SCRIPT_DIR}/dev_env/docker/README.md
 
     # Update Docker image versions in the Book
     update_image_versions ${BOOK_DIR}/src/kernel/intel-tdx.md
     update_image_versions ${BOOK_DIR}/src/kernel/README.md
     update_image_versions ${BOOK_DIR}/src/osdk/guide/intel-tdx.md
+
+    # Update Docker image versions in the shared test action
+    update_image_versions "${ASTER_SRC_DIR}/.github/actions/test/action.yml"
 
     # Update Docker image versions in workflows
     ALL_WORKFLOWS=$(find "${ASTER_SRC_DIR}/.github/workflows/" -type f -name "*.yml")

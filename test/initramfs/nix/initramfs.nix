@@ -2,8 +2,6 @@
   lib,
   pkgs,
   stdenvNoCC,
-  fetchFromGitHub,
-  hostPlatform,
   writeClosure,
   busybox,
   benchmark,
@@ -18,14 +16,6 @@ let
     root = ./../etc;
     fileset = ./../etc;
   };
-  gvisor_libs =
-    if conformance != null && conformance.testSuite == "gvisor" then
-      builtins.path {
-        name = "gvisor-libs";
-        path = "/lib/x86_64-linux-gnu";
-      }
-    else
-      null;
   resolv_conf = pkgs.callPackage ./resolv_conf.nix { dnsServer = dnsServer; };
   # Whether the initramfs should include evtest, a common tool to debug input devices (`/dev/input/eventX`)
   is_evtest_included = false;
@@ -44,7 +34,7 @@ stdenvNoCC.mkDerivation {
   name = "initramfs";
   buildCommand = ''
     mkdir -p $out/{dev,etc,root,usr,opt,tmp,var,proc,sys}
-    mkdir -p $out/{benchmark,test,ext2,exfat}
+    mkdir -p $out/{benchmark,test,ext2,exfat,nvme}
     mkdir -p $out/usr/{bin,sbin,lib,lib64,local}
     ln -sfn usr/bin $out/bin
     ln -sfn usr/sbin $out/sbin
@@ -72,16 +62,6 @@ stdenvNoCC.mkDerivation {
 
     ${lib.optionalString (conformance != null) ''
       cp -r "${conformance.package}"/* $out/
-    ''}
-
-    ${lib.optionalString (conformance != null && conformance.testSuite == "gvisor") ''
-      # FIXME: Build gvisor syscall test with nix to avoid manual library copying.
-      mkdir -p $out/lib/x86_64-linux-gnu
-      cp -L ${gvisor_libs}/ld-linux-x86-64.so.2 $out/lib64/ld-linux-x86-64.so.2
-      cp -L ${gvisor_libs}/libstdc++.so.6 $out/lib/x86_64-linux-gnu/libstdc++.so.6
-      cp -L ${gvisor_libs}/libgcc_s.so.1 $out/lib/x86_64-linux-gnu/libgcc_s.so.1
-      cp -L ${gvisor_libs}/libc.so.6 $out/lib/x86_64-linux-gnu/libc.so.6
-      cp -L ${gvisor_libs}/libm.so.6 $out/lib/x86_64-linux-gnu/libm.so.6
     ''}
 
     # Use `writeClosure` to retrieve all dependencies of the specified packages.

@@ -25,7 +25,7 @@ pub(super) fn sys_move_mount(
     if !(flags - supported_flags).is_empty() {
         return_errno_with_message!(Errno::EOPNOTSUPP, "unsupported move_mount flags");
     }
-    super::fsopen::check_mount_api_capability(ctx)?;
+    super::mount::check_mount_api_capability(ctx)?;
 
     let from_path = ctx
         .user_space()
@@ -51,13 +51,13 @@ pub(super) fn sys_move_mount(
     match source {
         MoveMountSource::Detached(detached_mount) => {
             let detached_root = Path::new_root(detached_mount);
-            detached_root.move_mount_to(&target_path, ctx)?;
+            detached_root.move_mount_to(target_path, ctx)?;
         }
         MoveMountSource::Path(from_path) => {
             let from_path = from_path.to_string_lossy();
             let from_fs_path = FsPath::from_fd_at(from_dfd, &from_path, EmptyPathStr::Reject)?;
             let source_path = path_resolver.lookup(&from_fs_path)?;
-            source_path.move_mount_to(&target_path, ctx)?;
+            source_path.move_mount_to(target_path, ctx)?;
         }
     };
 
@@ -80,6 +80,7 @@ fn get_detached_mount(from_dfd: RawFileDesc, ctx: &Context) -> Result<Arc<Mount>
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug)]
     struct MoveMountFlags: u32 {
         const MOVE_MOUNT_F_SYMLINKS   = 0x0000_0001;
         const MOVE_MOUNT_F_AUTOMOUNTS = 0x0000_0002;

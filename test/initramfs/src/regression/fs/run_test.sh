@@ -94,12 +94,14 @@ test_ext2 "/ext2" "test_file.txt"
 ./ext2/open_dir
 ./ext2/open_unlink
 ./ext2/permissions
+./ext2/preadv_short_read
 ./ext2/readdir
 ./ext2/rename
 ./ext2/rmdir
 ./ext2/shared_block_device
 ./ext2/short_rw
 ./ext2/sparse
+./ext2/sticky
 ./ext2/symlink
 ./ext2/unix_socket
 ./ext2/xattr
@@ -112,6 +114,14 @@ echo "All fdatasync test passed."
 echo "Start mount bind file test......"
 test_mount_bind_file
 echo "All mount bind file test passed."
+
+TEST_TMPDIR=/tmp TEST_DIRECT=0 ./empty_write/empty_write
+TEST_TMPDIR=/exfat TEST_DIRECT=0 ./empty_write/empty_write
+TEST_TMPDIR=/exfat TEST_DIRECT=1 ./empty_write/empty_write
+TEST_TMPDIR=/ext2 TEST_DIRECT=0 ./empty_write/empty_write
+TEST_TMPDIR=/ext2 TEST_DIRECT=1 ./empty_write/empty_write
+
+./exfat/read_eof
 
 ./getcwd/getcwd
 
@@ -126,10 +136,23 @@ echo "All mount bind file test passed."
 
 ./mount/listmount
 ./mount/mount_api
+./mount/mount_capability
+./mount/mount_flag_enforcement
 ./mount/mount_move
+./mount/mount_propagation
+./mount/mount_readonly
 
+TEST_TMPDIR=/tmp ./name_max/name_max
+TEST_TMPDIR=/ext2 ./name_max/name_max
+
+./overlayfs/lchown_lower_symlink
+./overlayfs/link_lower_file
+./overlayfs/mknod_whiteout_rejected
 ./overlayfs/ovl_test
 ./overlayfs/readdir_small_buffer
+./overlayfs/rmdir_lower_only_nonempty
+./overlayfs/sparse_copyup_consistency
+./overlayfs/xino_dino_identity
 
 ./procfs/dentry_cache
 ./procfs/fd
@@ -148,6 +171,11 @@ echo "All mount bind file test passed."
 ./pseudofs/pseudo_inode
 ./pseudofs/pseudo_mount
 
+./ramfs/read_eof
+./ramfs/read_truncate_race
+./ramfs/readdir
+
+./rename/permission
 ./rename/same_inode
 
 ./statx/btime
@@ -155,6 +183,10 @@ echo "All mount bind file test passed."
 ./symlink/symlink
 
 ./sync/sync
+
+if [ "$(uname -m)" = "x86_64" ]; then
+    ./sysfs/device/run_test.sh
+fi
 
 ./tmpfile/tmpfile
 

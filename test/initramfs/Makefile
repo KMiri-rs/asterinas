@@ -19,6 +19,24 @@ NIXPKGS_CACHE_TTL := 2592000 # In seconds
 MKFILE_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 CUR_DIR := $(patsubst %/,%,$(dir $(MKFILE_PATH)))
 BUILD_DIR := $(CUR_DIR)/build
+# Directory for the result links of the prebuilt targets. The default is Nix's GC root directory,
+# so that `make nix_gc` keeps the packages, but only root can write there. Other users, such as
+# CI runners, set a writable directory instead. Nix then records each link as a GC root itself.
+PREBUILT_ROOT ?= /nix/var/nix/gcroots/auto
+# Make the Nix commands below use the Cachix caches from `nixConfig` in `flake.nix`. Nix reads
+# `nixConfig` only for flake commands such as `nix develop`, so `make` and the Docker image build
+# would otherwise compile packages that the caches already have. Skip this on hosts without Nix,
+# so that targets such as `clean` still work.
+ifneq ($(shell command -v nix-instantiate),)
+FLAKE_NIX_SETTING = $(subst ",,$(shell nix-instantiate --eval -E \
+	'toString (import $(CUR_DIR)/../../flake.nix).nixConfig.$(1)'))
+define NIX_CONFIG :=
+$(NIX_CONFIG)
+extra-substituters = $(call FLAKE_NIX_SETTING,extra-substituters)
+extra-trusted-public-keys = $(call FLAKE_NIX_SETTING,extra-trusted-public-keys)
+endef
+export NIX_CONFIG
+endif
 INITRAMFS_DIR := $(BUILD_DIR)/initramfs
 ROOTFS_IMAGE := $(BUILD_DIR)/rootfs.img
 INITRAMFS_SKIP_GZIP ?= 0
@@ -125,7 +143,7 @@ x86_64_pkgs:
 		--argstr target x86_64 \
 		--arg enableBenchmarkTest true \
 		--arg enableConformanceTest true \
-		--out-link /nix/var/nix/gcroots/auto/x86_64-pkgs \
+		--out-link $(PREBUILT_ROOT)/x86_64-pkgs \
 		-A busybox \
 		-A benchmark.fio \
 		-A benchmark.hackbench \
@@ -137,8 +155,11 @@ x86_64_pkgs:
 		-A benchmark.schbench \
 		-A benchmark.sqlite-speedtest1 \
 		-A benchmark.sysbench \
-		-A conformance.ltp \
+		-A conformance.gvisor \
 		-A conformance.kselftest \
+		-A conformance.ltp \
+		-A conformance.pjdfstest \
+		-A conformance.xfstests \
 		-A regression.package
 
 # Prebuild riscv64 packages
@@ -152,7 +173,23 @@ riscv64_pkgs:
 		--argstr target riscv64 \
 		--arg enableBenchmarkTest false \
 		--arg enableConformanceTest true \
-		--out-link /nix/var/nix/gcroots/auto/riscv64-pkgs \
+		--out-link $(PREBUILT_ROOT)/riscv64-pkgs \
+		-A busybox \
+		-A conformance.ltp \
+		-A regression.package
+
+# Prebuild aarch64 packages
+# Note: This may cause GitHub Runner ResourceExhausted errors when publish nix docker image.
+# If such errors occur, try building each package individually and clear the build cache.
+aarch64_pkgs:
+	@nix-build \
+		nix/default.nix \
+		--tarball-ttl $(NIXPKGS_CACHE_TTL) \
+		$(NIX_QUIET) \
+		--argstr target aarch64 \
+		--arg enableBenchmarkTest false \
+		--arg enableConformanceTest true \
+		--out-link $(PREBUILT_ROOT)/aarch64-pkgs \
 		-A busybox \
 		-A conformance.ltp \
 		-A regression.package
@@ -179,27 +216,27 @@ initramfs_pkgs:
 		$(NIX_QUIET) \
 		--argstr target x86_64 \
 		--arg enableBenchmarkTest true \
-		--out-link /nix/var/nix/gcroots/auto/x86_64-initramfs-with-benchmark \
+		--out-link $(PREBUILT_ROOT)/x86_64-initramfs-with-benchmark \
 		-A initramfs-image
 
 $(EXT2_IMAGE):
 	@mkdir -p $(BUILD_DIR)
-	@dd if=/dev/zero of=$(EXT2_IMAGE) bs=2G count=1
-	@mke2fs $(EXT2_IMAGE)
+	@truncate -s 2G $(EXT2_IMAGE)
+	@mke2fs -t ext2 -F $(EXT2_IMAGE)
 
 $(EXFAT_IMAGE):
 	@mkdir -p $(BUILD_DIR)
-	@fallocate -l 512M $(EXFAT_IMAGE)
+	@truncate -s 512M $(EXFAT_IMAGE)
 	@mkfs.exfat $(EXFAT_IMAGE)
 
 $(LTP_DEV_IMAGE):
 	@mkdir -p $(BUILD_DIR)
-	@dd if=/dev/zero of=$(LTP_DEV_IMAGE) bs=512M count=1
+	@truncate -s 512M $(LTP_DEV_IMAGE)
 	@mke2fs -t ext2 -F $(LTP_DEV_IMAGE)
 
 $(SSD_IMAGE):
 	@mkdir -p $(BUILD_DIR)
-	@dd if=/dev/zero of=$(SSD_IMAGE) bs=256M count=1
+	@truncate -s 2G $(SSD_IMAGE)
 	@mke2fs -t ext2 -F $(SSD_IMAGE)
 
 $(XFSTESTS_TEST_IMAGE):
@@ -215,12 +252,12 @@ $(XFSTESTS_SCRATCH_IMAGE):
 .PHONY: format
 format:
 	@$(MAKE) --no-print-directory -C src/regression format
-	@nixfmt nix
+	@../../tools/nixfmt.sh nix
 
 .PHONY: check
 check:
 	@$(MAKE) --no-print-directory -C src/regression check
-	@nixfmt --check nix
+	@../../tools/nixfmt.sh --check nix
 
 .PHONY: clean
 clean:

@@ -46,6 +46,8 @@ pub(super) fn sys_mount(
             .get_top_path()
     };
 
+    check_mount_api_capability(ctx)?;
+
     if mount_flags.contains(MountFlags::MS_REMOUNT) && mount_flags.contains(MountFlags::MS_BIND) {
         // If `MS_BIND` is specified, only the mount flags are changed.
         do_remount_mnt(&dst_path, mount_flags, ctx)?;
@@ -74,6 +76,16 @@ pub(super) fn sys_mount(
     }
 
     Ok(SyscallReturn::Return(0))
+}
+
+pub(super) fn check_mount_api_capability(ctx: &Context) -> Result<()> {
+    use crate::{process::credentials::capabilities::CapSet, security::lsm::hooks as lsm_hooks};
+
+    lsm_hooks::on_capable(lsm_hooks::CapableContext::new(
+        ctx.thread_local.borrow_user_ns().as_ref(),
+        ctx.posix_thread,
+        CapSet::SYS_ADMIN,
+    ))
 }
 
 /// Remounts the mount with new flags.
@@ -125,14 +137,14 @@ fn do_bind_mount(
             .lookup(&fs_path)?
     };
 
-    src_path.bind_mount_to(&dst_path, recursive, ctx)?;
+    src_path.bind_mount_to(dst_path, recursive, ctx)?;
     Ok(())
 }
 
 // All valid propagation flags.
-const MS_PROPAGATION: MountFlags = MountFlags::MS_SHARED
-    .union(MountFlags::MS_PRIVATE)
+const MS_PROPAGATION: MountFlags = MountFlags::MS_PRIVATE
     .union(MountFlags::MS_SLAVE)
+    .union(MountFlags::MS_SHARED)
     .union(MountFlags::MS_UNBINDABLE);
 
 fn do_change_type(target_path: Path, flags: MountFlags, ctx: &Context) -> Result<()> {
@@ -153,13 +165,17 @@ fn do_change_type(target_path: Path, flags: MountFlags, ctx: &Context) -> Result
         );
     }
 
-    if flags.contains(MountFlags::MS_PRIVATE) {
-        let recursive = flags.contains(MountFlags::MS_REC);
-        target_path.set_mount_propagation(MountPropType::Private, recursive, ctx)?;
-        Ok(())
-    } else {
-        return_errno_with_message!(Errno::EINVAL, "the mount propagation type is unsupported");
-    }
+    let is_recursive = flags.contains(MountFlags::MS_REC);
+    let propagation_type = match propagation_flags {
+        MountFlags::MS_PRIVATE => MountPropType::Private,
+        MountFlags::MS_SLAVE => MountPropType::Slave,
+        MountFlags::MS_SHARED => MountPropType::Shared,
+        MountFlags::MS_UNBINDABLE => MountPropType::Unbindable,
+        _ => unreachable!(),
+    };
+    target_path.set_propagation(propagation_type, is_recursive, ctx)?;
+
+    Ok(())
 }
 
 /// Moves a mount from src location to dst location.
@@ -177,7 +193,7 @@ fn do_move_mount_old(src_name_addr: Vaddr, dst_path: Path, ctx: &Context) -> Res
             .lookup(&fs_path)?
     };
 
-    src_path.move_mount_to(&dst_path, ctx)?;
+    src_path.move_mount_to(dst_path, ctx)?;
 
     Ok(())
 }
@@ -251,31 +267,32 @@ fn open_fs(
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq)]
     struct MountFlags: u32 {
-        const MS_RDONLY        =   1 << 0;       // Mount read-only.
-        const MS_NOSUID        =   1 << 1;       // Ignore suid and sgid bits.
-        const MS_NODEV         =   1 << 2;       // Disallow access to device special files.
-        const MS_NOEXEC        =   1 << 3;       // Disallow program execution.
-        const MS_SYNCHRONOUS   =   1 << 4;       // Writes are synced at once.
-        const MS_REMOUNT       =   1 << 5;       // Alter flags of a mounted FS.
-        const MS_MANDLOCK      =   1 << 6;       // Allow mandatory locks on an FS.
-        const MS_DIRSYNC       =   1 << 7;       // Directory modifications are synchronous.
-        const MS_NOSYMFOLLOW   =   1 << 8;       // Do not follow symlinks.
-        const MS_NOATIME       =   1 << 10;      // Do not update access times.
-        const MS_NODIRATIME    =   1 << 11;      // Do not update directory access times.
-        const MS_BIND          =   1 << 12;      // Bind directory at different place.
-        const MS_MOVE          =   1 << 13;      // Move mount from old to new.
-        const MS_REC           =   1 << 14;      // Create recursive mount.
-        const MS_SILENT        =   1 << 15;      // Suppress certain messages in kernel log.
-        const MS_POSIXACL      =   1 << 16;      // VFS does not apply the umask.
-        const MS_UNBINDABLE    =   1 << 17;      // Change to unbindable.
-        const MS_PRIVATE       =   1 << 18; 	 // Change to private.
-        const MS_SLAVE         =   1 << 19;      // Change to slave.
-        const MS_SHARED        =   1 << 20;      // Change to shared.
-        const MS_RELATIME      =   1 << 21; 	 // Update atime relative to mtime/ctime.
-        const MS_KERNMOUNT     =   1 << 22;      // This is a kern_mount call.
-        const MS_STRICTATIME   =   1 << 24; 	 // Always perform atime updates.
-        const MS_LAZYTIME      =   1 << 25; 	 // Update the on-disk [acm]times lazily.
+        const MS_RDONLY      = 1 << 0;  // Mount read-only.
+        const MS_NOSUID      = 1 << 1;  // Ignore suid and sgid bits.
+        const MS_NODEV       = 1 << 2;  // Disallow access to device special files.
+        const MS_NOEXEC      = 1 << 3;  // Disallow program execution.
+        const MS_SYNCHRONOUS = 1 << 4;  // Writes are synced at once.
+        const MS_REMOUNT     = 1 << 5;  // Alter flags of a mounted FS.
+        const MS_MANDLOCK    = 1 << 6;  // Allow mandatory locks on an FS.
+        const MS_DIRSYNC     = 1 << 7;  // Directory modifications are synchronous.
+        const MS_NOSYMFOLLOW = 1 << 8;  // Do not follow symlinks.
+        const MS_NOATIME     = 1 << 10; // Do not update access times.
+        const MS_NODIRATIME  = 1 << 11; // Do not update directory access times.
+        const MS_BIND        = 1 << 12; // Bind directory at different place.
+        const MS_MOVE        = 1 << 13; // Move mount from old to new.
+        const MS_REC         = 1 << 14; // Create recursive mount.
+        const MS_SILENT      = 1 << 15; // Suppress certain messages in kernel log.
+        const MS_POSIXACL    = 1 << 16; // VFS does not apply the umask.
+        const MS_UNBINDABLE  = 1 << 17; // Change to unbindable.
+        const MS_PRIVATE     = 1 << 18; // Change to private.
+        const MS_SLAVE       = 1 << 19; // Change to slave.
+        const MS_SHARED      = 1 << 20; // Change to shared.
+        const MS_RELATIME    = 1 << 21; // Update atime relative to mtime/ctime.
+        const MS_KERNMOUNT   = 1 << 22; // This is a kern_mount call.
+        const MS_STRICTATIME = 1 << 24; // Always perform atime updates.
+        const MS_LAZYTIME    = 1 << 25; // Update the on-disk [acm]times lazily.
     }
 }
 

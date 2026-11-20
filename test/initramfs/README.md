@@ -30,10 +30,6 @@ Most tests in this directory are compiled and packaged using [Nix](https://nixos
 
 > **Note**: If you are adding a new test to the `regression` directory, ensure that it supports multiple architectures. Some of the existing tests lack proper architecture-specific handling.
 
-### Conformance Test Suite - gVisor Exception
-
-While most tests rely on `Nix` for compilation, the `gvisor` conformance test suite currently cannot be built with `Nix`. Instead, the `gvisor` tests are compiled in the Docker image. For details, refer to `tools/docker/Dockerfile`.
-
 ### Linux Kernel Selftest (kselftest)
 
 The `kselftest` suite builds a subset of Linux's in-tree selftests
@@ -89,7 +85,7 @@ The following benchmarks are currently supported:
 
 All benchmarks except `sysbench` support both `x86_64` and `riscv64` architectures.
 
-These benchmarks are precompiled and packaged into the Docker image for convenience. Refer to `tools/docker/nix/Dockerfile` for details.
+These benchmarks are precompiled and packaged into the Docker image for convenience. Refer to `tools/dev_env/docker/prebuilt-nix-packages/Dockerfile` for details.
 
 ## Adding New Benchmarks
 

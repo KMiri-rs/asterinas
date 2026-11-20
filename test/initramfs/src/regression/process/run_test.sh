@@ -16,6 +16,7 @@ fi
 ./clone3/clone_process
 
 ./cpu_affinity/cpu_affinity
+./cpu_affinity/permission
 
 ./execve/execve
 ./execve/execve_comm
@@ -53,13 +54,17 @@ if [ "$(uname -m)" = "x86_64" ]; then
     ./ptrace/read_write_regs
 fi
 
+./sched/ioprio_permission
 ./sched/sched_attr_getset
 ./sched/sched_param_getset
 ./sched/sched_param_idle
+./sched/sched_set_permission
+./sched/setpriority_permission
 
 ./signal/kill
 ./signal/parent_death_signal
 ./signal/pidfd_send_signal
+./signal/rt_sigpending
 ./signal/signal_fd
 ./signal/signal_test2
 
@@ -77,4 +82,5 @@ fi
 ./job_control
 ./pidfd
 ./pidfd_getfd
+./set_tid_address
 ./wait4

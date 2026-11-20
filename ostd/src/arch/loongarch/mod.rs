@@ -11,6 +11,7 @@ pub(crate) mod io;
 pub(crate) mod iommu;
 pub(crate) mod irq;
 pub(crate) mod mm;
+pub mod power;
 pub mod serial;
 pub(crate) mod task;
 mod timer;
@@ -48,6 +49,8 @@ pub(crate) unsafe fn late_init_on_bsp() {
     // 1. All the system device memory have been removed from the builder.
     // 2. LoongArch platforms do not have port I/O.
     unsafe { crate::io::init(io_mem_builder) };
+
+    power::init();
 }
 
 /// Initializes application-processor-specific state.

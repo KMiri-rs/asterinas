@@ -10,7 +10,6 @@
 #![feature(array_try_from_fn)]
 #![feature(associated_type_defaults)]
 #![feature(btree_cursors)]
-#![feature(debug_closure_helpers)]
 #![feature(format_args_nl)]
 #![feature(ip_as_octets)]
 #![feature(linked_list_cursors)]
@@ -51,6 +50,7 @@ pub mod fs;
 mod init;
 mod ipc;
 mod net;
+pub mod power;
 pub mod prelude;
 pub mod process;
 mod sched;
@@ -59,8 +59,8 @@ mod syscall;
 mod thread;
 mod time;
 pub mod util;
-// TODO: Add vDSO support for other architectures.
-#[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
+// TODO: Add vDSO support for LoongArch.
+#[cfg(not(target_arch = "loongarch64"))]
 mod vdso;
 pub mod vm;
 

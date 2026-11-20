@@ -1,23 +1,35 @@
 // SPDX-License-Identifier: MPL-2.0
 
-pub mod capability;
-pub mod common_cfg;
-pub mod device;
-pub mod driver;
-pub mod legacy;
+mod capability;
+mod common_cfg;
+mod device;
+mod driver;
+pub(crate) mod legacy;
 pub(super) mod msix;
 
-use alloc::sync::Arc;
+use alloc::{boxed::Box, collections::VecDeque};
 
 use aster_pci::PCI_BUS;
-use spin::Once;
+use ostd::sync::SpinLock;
 
 use self::driver::VirtioPciDriver;
+use crate::transport::VirtioTransport;
 
-pub static VIRTIO_PCI_DRIVER: Once<Arc<VirtioPciDriver>> = Once::new();
-pub fn virtio_pci_init() {
-    VIRTIO_PCI_DRIVER.call_once(|| Arc::new(VirtioPciDriver::new()));
+// Transports await functional initialization after PCI driver registration.
+static TRANSPORTS: SpinLock<VecDeque<Box<dyn VirtioTransport>>> = SpinLock::new(VecDeque::new());
+
+fn push_device_transport(transport: Box<dyn VirtioTransport>) {
+    TRANSPORTS.lock().push_back(transport);
+}
+
+pub(crate) fn pop_device_transport() -> Option<Box<dyn VirtioTransport>> {
+    TRANSPORTS.lock().pop_front()
+}
+
+pub(super) fn virtio_pci_init() {
     PCI_BUS
-        .lock()
-        .register_driver(VIRTIO_PCI_DRIVER.get().unwrap().clone());
+        .get()
+        .unwrap()
+        .register_driver(Box::new(VirtioPciDriver))
+        .unwrap();
 }

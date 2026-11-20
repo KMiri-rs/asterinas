@@ -10,7 +10,7 @@ use crate::{
     packet::{ApplicationLayer, RxPacket, TransportLayer, TxPacket},
 };
 
-pub fn parse(
+pub(in crate::iface) fn parse(
     pkt: RxPacket<TransportLayer>,
     ip_repr: &IpRepr,
     csum: bool,
@@ -153,7 +153,7 @@ fn parse_options(mut options: VmReader<Infallible>, repr: &mut TcpRepr<'static>)
     true
 }
 
-pub fn emit(
+pub(in crate::iface) fn emit(
     mut pkt: TxPacket<ApplicationLayer>,
     ip_repr: &IpRepr,
     tcp_repr: &TcpRepr<'_>,
@@ -271,6 +271,7 @@ impl Header {
 }
 
 bitflags::bitflags! {
+    #[derive(Clone, Copy, Debug)]
     struct Flags: u8 {
         const FIN = 1 << 0;
         const SYN = 1 << 1;

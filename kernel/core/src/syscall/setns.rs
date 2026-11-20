@@ -35,7 +35,7 @@ pub(super) fn sys_setns(fd: RawFileDesc, flags: u32, ctx: &Context) -> Result<Sy
 
     let file = {
         let file_table = ctx.thread_local.borrow_file_table();
-        let file_table_locked = file_table.unwrap().read();
+        let file_table_locked = file_table.read();
         file_table_locked.get_file(fd.try_into()?)?.clone()
     };
 
@@ -81,9 +81,7 @@ fn build_proxy_from_pid_file(
     };
 
     let current_proxy = ctx.thread_local.borrow_ns_proxy();
-    let current_proxy = current_proxy.unwrap();
-
-    let mut builder = NsProxyBuilder::new(current_proxy);
+    let mut builder = NsProxyBuilder::new(&current_proxy);
 
     if flags.contains(CloneFlags::CLONE_NEWCGROUP) {
         let target_ns = target_proxy.cgroup_ns();
@@ -126,9 +124,7 @@ fn build_proxy_from_ns_file(
         .ok_or_else(|| Error::with_message(Errno::EINVAL, "the file is not a ns file"))?;
 
     let current_proxy = ctx.thread_local.borrow_ns_proxy();
-    let current_proxy = current_proxy.unwrap();
-
-    let mut builder = NsProxyBuilder::new(current_proxy);
+    let mut builder = NsProxyBuilder::new(&current_proxy);
 
     #[expect(clippy::nonminimal_bool)]
     let applied = false

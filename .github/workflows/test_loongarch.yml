@@ -7,11 +7,15 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   basic-test:
     runs-on: ubuntu-latest
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
     strategy:
       matrix:
@@ -25,3 +29,6 @@ jobs:
           auto_test: 'general'
           runs_on: 'ubuntu-latest'
           arch: 'loongarch64'
+          restore_osdk_from_cache: true
+          restore_kernel_from_cache: ${{ matrix.id == 'compile' }}
+          save_builds_to_cache: ${{ matrix.id == 'compile' }}

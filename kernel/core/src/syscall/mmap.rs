@@ -4,12 +4,18 @@ use align_ext::AlignExt;
 
 use super::SyscallReturn;
 use crate::{
-    fs::file::file_table::{RawFileDesc, get_file_fast},
+    fs::{
+        file::{
+            StatusFlags,
+            file_table::{RawFileDesc, get_file_fast},
+        },
+        vfs::path::PerMountFlags,
+    },
     prelude::*,
     vm::{
         page_cache::VmoOptions,
         perms::VmPerms,
-        vmar::{VMAR_CAP_ADDR, VMAR_LOWEST_ADDR, VmarMapOffset},
+        vmar::{MmapMode, VMAR_CAP_ADDR, VMAR_LOWEST_ADDR, VmarMapOffset},
     },
 };
 
@@ -75,7 +81,8 @@ fn do_sys_mmap(
 
     let user_space = ctx.user_space();
     let vmar = user_space.vmar();
-    let vm_map_options = {
+
+    let map_addr = {
         let mut options = vmar.new_map(len, vm_perms);
 
         if option.flags().is_fixed() {
@@ -99,7 +106,7 @@ fn do_sys_mmap(
         }
 
         if option.typ().is_shared() {
-            options = options.is_shared(true);
+            options = options.map_mode(MmapMode::Shared);
         }
 
         if option.flags().contains(MMapFlags::MAP_ANONYMOUS) {
@@ -118,32 +125,49 @@ fn do_sys_mmap(
                 };
                 options = options.vmo(shared_vmo);
             }
+
+            options.build()?
         } else {
             let mut file_table = ctx.thread_local.borrow_file_table_mut();
-            let file = get_file_fast!(&mut file_table, raw_fd.try_into()?);
+            let file = get_file_fast!(&mut file_table, raw_fd.try_into()?).into_owned();
+
+            if file.status_flags().contains(StatusFlags::O_PATH) {
+                return_errno_with_message!(Errno::EBADF, "the file is opened as a path");
+            }
 
             let access_mode = file.access_mode();
-            if vm_perms.contains(VmPerms::READ) && !access_mode.is_readable() {
+            if !access_mode.is_readable() {
                 return_errno_with_message!(Errno::EACCES, "the file is not opened readable");
             }
-            if option.typ() == MMapType::Shared && !access_mode.is_writable() {
+            if option.typ().is_shared() && !access_mode.is_writable() {
                 if vm_perms.contains(VmPerms::WRITE) {
                     return_errno_with_message!(Errno::EACCES, "the file is not opened writable");
                 }
                 vm_may_perms.remove(VmPerms::MAY_WRITE);
             }
 
+            // File access errors take precedence over the `noexec` restriction.
+            // Clear MAY_EXEC to prevent a later `mprotect` from granting execution.
+            let mount_flags = file.path().mount_node().flags();
+            if mount_flags.contains(PerMountFlags::NOEXEC) {
+                if vm_perms.contains(VmPerms::EXEC) {
+                    return_errno_with_message!(
+                        Errno::EPERM,
+                        "the file is on a file system mounted with `noexec`"
+                    );
+                }
+                vm_may_perms.remove(VmPerms::MAY_EXEC);
+            }
+
             options = options
                 .may_perms(vm_may_perms)
-                .mappable(file.into_owned())?
+                .mappable(&file)?
                 .vmo_offset(offset)
                 .handle_page_faults_around();
+
+            options.build()?
         }
-
-        options
     };
-
-    let map_addr = vm_map_options.build()?;
 
     Ok(map_addr)
 }
@@ -240,7 +264,8 @@ impl MMapType {
 
 bitflags! {
     // If you update the flags here, please also check and update `LEGACY_MMAP_FLAGS` below.
-    struct MMapFlags : u32 {
+    #[derive(Clone, Copy, Debug)]
+    struct MMapFlags: u32 {
         const MAP_FIXED           = 0x10;
         const MAP_ANONYMOUS       = 0x20;
         #[cfg(target_arch = "x86_64")]

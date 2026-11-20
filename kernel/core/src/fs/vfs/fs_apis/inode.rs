@@ -307,6 +307,7 @@ bitflags! {
     ///
     /// The revalidation callbacks run on every matching cache hit, so
     /// filesystems should keep them cheap.
+    #[derive(Clone, Copy, Debug)]
     pub(crate) struct RevalidationPolicy: u8 {
         /// Revalidate positive cache entries (cached child inodes).
         ///
@@ -684,7 +685,7 @@ pub(crate) trait Inode: Any + FileOps + Send + Sync {
             {
                 return_errno_with_message!(Errno::EACCES, "owner permission check failed");
             }
-        } else if metadata.gid == creds.fsgid() {
+        } else if creds.has_group_for_fs_access(metadata.gid) {
             if (perm.may_read() && !mode.is_group_readable())
                 || (perm.may_write() && !mode.is_group_writable())
                 || (perm.may_exec() && !mode.is_group_executable())
@@ -749,6 +750,7 @@ impl Debug for dyn Inode {
 pub(crate) struct Extension {
     group1: Once<ThinBox<dyn Any + Send + Sync>>,
     group2: Once<ThinBox<dyn Any + Send + Sync>>,
+    group3: Once<ThinBox<dyn Any + Send + Sync>>,
 }
 
 impl Extension {
@@ -757,6 +759,7 @@ impl Extension {
         Self {
             group1: Once::new(),
             group2: Once::new(),
+            group3: Once::new(),
         }
     }
 
@@ -768,6 +771,11 @@ impl Extension {
     /// Gets the second extension group.
     pub(crate) fn group2(&self) -> &Once<ThinBox<dyn Any + Send + Sync>> {
         &self.group2
+    }
+
+    /// Gets the third extension group.
+    pub(crate) fn group3(&self) -> &Once<ThinBox<dyn Any + Send + Sync>> {
+        &self.group3
     }
 }
 

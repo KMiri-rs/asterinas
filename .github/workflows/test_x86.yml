@@ -7,11 +7,15 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   basic-test:
     runs-on: ubuntu-latest
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
       volumes:
         # Map the following directories on the host into the container so that
@@ -34,17 +38,30 @@ jobs:
         with:
           auto_test: 'general'
           runs_on: 'ubuntu-latest'
+          restore_osdk_from_cache: ${{ matrix.id != 'usermode_test' }}
+          restore_kernel_from_cache: ${{ matrix.id == 'compile' }}
+          save_builds_to_cache: ${{ matrix.id == 'compile' }}
 
   osdk-test:
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.image }}
       options: -v /dev:/dev --privileged
+      volumes:
+        # Map the following directories on the host into the container so that
+        # the container can remove them to save some precious disk space (~16GB),
+        # which is quite limited on free-tier Github runners.
+        - /usr/lib/google-cloud-sdk:/usr/lib/google-cloud-sdk
+        - /usr/local/lib/android:/usr/local/lib/android
+        - /usr/share/dotnet:/usr/share/dotnet
     strategy:
       fail-fast: false
       matrix:
-        image: ['asterinas/kernel-dev:0.18.1-20260918', 'asterinas/osdk-dev:0.18.1-20260918']
+        image: ['asterinas/kernel-dev:0.19.0-20261012', 'asterinas/osdk-dev:0.19.0-20261012']
     steps:
+      - name: Free disk space
+        # Remove unused packages from the host to save disk space.
+        run: rm -rf /usr/lib/google-cloud-sdk/* /usr/local/lib/android/* /usr/share/dotnet/*
       - uses: actions/checkout@v4
 
       - name: Run OSDK tests
@@ -56,7 +73,7 @@ jobs:
   boot-test:
     runs-on: ubuntu-latest
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
     strategy:
       fail-fast: false
@@ -75,11 +92,13 @@ jobs:
           smp: ${{ matrix.smp }}
           boot_protocol: ${{ matrix.boot_protocol }}
           rootfs_boot: ${{ matrix.rootfs_boot }}
+          restore_osdk_from_cache: true
+          restore_kernel_from_cache: true
 
   regression-test:
     runs-on: ubuntu-latest
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
       volumes:
         # Map the following directories on the host into the container so that
@@ -106,11 +125,14 @@ jobs:
           release: ${{ !contains(matrix.release, 'false') }}
           smp: ${{ matrix.smp }}
           boot_protocol: ${{ matrix.boot_protocol || 'linux-efi-handover64' }}
+          restore_osdk_from_cache: true
+          restore_kernel_from_cache: true
+          save_builds_to_cache: ${{ matrix.variant == 'multiboot2-smp4' }}
 
   conformance-test:
     runs-on: ubuntu-latest
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
       volumes:
         # Map the following directories on the host into the container so that
@@ -153,6 +175,8 @@ jobs:
           conformance_test_workdir: ${{ matrix.conformance_test_workdir }}
           conformance_test_extra_blocklists: ${{ matrix.conformance_test_extra_blocklists }}
           boot_protocol: ${{ matrix.boot_protocol || 'linux-efi-handover64' }}
+          restore_osdk_from_cache: true
+          restore_kernel_from_cache: true
 
   cross-compile-test:
     timeout-minutes: 30
@@ -162,7 +186,7 @@ jobs:
         include:
           - name: arm-cross-boot
             runs_on: ubuntu-24.04-arm
-            image: asterinas/kernel-dev:0.18.1-20260918
+            image: asterinas/kernel-dev:0.19.0-20261012
             auto_test: boot
             enable_kvm: false
     runs-on: ${{ matrix.runs_on }}
@@ -175,12 +199,13 @@ jobs:
         with:
           auto_test: ${{ matrix.auto_test }}
           enable_kvm: ${{ matrix.enable_kvm }}
+          restore_osdk_from_cache: true
 
   xfstests:
     name: xfstests (${{ matrix.fs_type }})
     runs-on: ubuntu-latest
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
       volumes:
         - /usr/lib/google-cloud-sdk:/usr/lib/google-cloud-sdk
@@ -194,7 +219,13 @@ jobs:
           - fs_type: 'ext2'
             runlist: 'short.list'
             disk_size: '2G'
+          - fs_type: 'overlay'
+            runlist: 'short.list'
+            disk_size: '6G'
           - fs_type: 'tmpfs'
+            runlist: 'short.list'
+            disk_size: ''
+          - fs_type: 'virtiofs'
             runlist: 'short.list'
             disk_size: ''
     steps:
@@ -211,3 +242,36 @@ jobs:
           xfstests_fs_type: ${{ matrix.fs_type }}
           xfstests_runlist: ${{ matrix.runlist }}
           xfstests_disk_size: ${{ matrix.disk_size }}
+          restore_osdk_from_cache: true
+          restore_kernel_from_cache: true
+
+  pjdfstest:
+    name: pjdfstest (${{ matrix.fs_type }})
+    runs-on: ubuntu-latest
+    container:
+      image: asterinas/kernel-dev:0.19.0-20261012
+      options: -v /dev:/dev --privileged
+      volumes:
+        - /usr/lib/google-cloud-sdk:/usr/lib/google-cloud-sdk
+        - /usr/local/lib/android:/usr/local/lib/android
+        - /usr/share/dotnet:/usr/share/dotnet
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - fs_type: 'ext2'
+          - fs_type: 'ramfs'
+    steps:
+      - name: Free disk space
+        run: rm -rf /usr/lib/google-cloud-sdk/* /usr/local/lib/android/* /usr/share/dotnet/*
+      - uses: actions/checkout@v4
+      - name: Run pjdfstest (${{ matrix.fs_type }})
+        uses: ./.github/actions/test
+        with:
+          auto_test: 'conformance'
+          conformance_test_suite: 'pjdfstest'
+          release: true
+          pjdfstest_fs_type: ${{ matrix.fs_type }}
+          restore_osdk_from_cache: true
+          restore_kernel_from_cache: true

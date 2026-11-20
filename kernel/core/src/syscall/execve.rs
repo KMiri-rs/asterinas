@@ -108,7 +108,7 @@ fn lookup_and_open_executable_file(
         // racy, but only for diagnostic purposes. This matches Linux.
         let is_cloexec = if let Ok(fd) = FileDesc::try_from(dfd) {
             let file_table = ctx.thread_local.borrow_file_table();
-            let file_table_locked = file_table.unwrap().read();
+            let file_table_locked = file_table.read();
             file_table_locked
                 .get_entry(fd)
                 .is_ok_and(|entry| entry.flags().contains(FdFlags::CLOEXEC))
@@ -137,8 +137,9 @@ fn lookup_and_open_executable_file(
 }
 
 bitflags::bitflags! {
+    #[derive(Clone, Copy, Debug)]
     struct OpenFlags: u32 {
-        const AT_EMPTY_PATH = 0x1000;
+        const AT_EMPTY_PATH       = 0x1000;
         const AT_SYMLINK_NOFOLLOW = 0x100;
     }
 }

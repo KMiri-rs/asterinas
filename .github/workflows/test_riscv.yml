@@ -7,11 +7,15 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   basic-test:
     runs-on: ubuntu-latest
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
       volumes:
         # Map the following directories on the host into the container so that
@@ -34,11 +38,14 @@ jobs:
         with:
           auto_test: 'general'
           arch: 'riscv64'
+          restore_osdk_from_cache: ${{ matrix.id != 'usermode_test' }}
+          restore_kernel_from_cache: ${{ matrix.id == 'compile' }}
+          save_builds_to_cache: ${{ matrix.id == 'compile' }}
 
   integration-test:
     runs-on: ubuntu-latest
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
       volumes:
         # Map the following directories on the host into the container so that
@@ -51,6 +58,7 @@ jobs:
       matrix:
         include:
           - test_id: 'boot-debug-smp4'
+            release: false
             smp: 4
 
           - test_id: 'boot-release'
@@ -74,4 +82,8 @@ jobs:
           auto_test: ${{ (startsWith(matrix.test_id, 'boot') && 'boot') || 'conformance' }}
           release: ${{ !contains(matrix.release, 'false') }}
           arch: 'riscv64'
+          smp: ${{ matrix.smp }}
           conformance_test_suite: 'ltp'
+          restore_osdk_from_cache: true
+          restore_kernel_from_cache: true
+          save_builds_to_cache: ${{ matrix.test_id == 'boot-release' }}

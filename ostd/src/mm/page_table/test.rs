@@ -827,7 +827,10 @@ mod mapping {
         let range = 0..HUGE_PAGE_SIZE;
         let prop = PageProperty::new_user(PageFlags::RW, CachePolicy::Writeback);
 
-        let mut cursor = pt.cursor_mut(&preempt_guard, &range).unwrap();
+        // Mapping a level-2 (huge) page needs a cursor locked down to level 2.
+        let mut cursor = pt
+            .cursor_mut_with_min_level(&preempt_guard, &range, 2)
+            .unwrap();
         unsafe { cursor.map((0, 2, prop)) };
 
         let probe_va = range.start + HUGE_PAGE_SIZE / 2;

@@ -137,6 +137,9 @@ pub enum PageType {
     PageTable = 2,
     Stack = 3,
     Interpreter = 4,
+    /// A slab page of the kernel heap. The objects in its slots are reported
+    /// with `kern_miri_alloc_heap_slot` and `kern_miri_dealloc_heap_slot`.
+    Heap = 5,
 }
 
 pub struct MiriStdout;

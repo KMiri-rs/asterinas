@@ -53,13 +53,13 @@ pub(super) fn switch_to_task(next_task: Arc<Task>, kind: SwitchKind) {
     // CPU, its context can be used exclusively.
     let next_task_ctx_ptr = next_task.ctx().get().cast_const();
 
-    // KMiri only needs the next task's address to find its thread. Do not hold
-    // an `Arc` here: this frame stays suspended until the current context is
-    // switched back to (for the bootstrap context, only after all tasks have
-    // stopped), so an `Arc` would keep the next task alive after it exits,
-    // which hardware does not. `CURRENT_TASK_PTR` keeps it alive while it runs.
+    // KMiri resumes the next task's thread, whose id is in the next context
+    // (where native code reads the registers to resume from). Read it now, while
+    // the context is exclusively ours; do not keep the `Arc` or the address: this
+    // frame stays suspended until it is switched back to.
+    // SAFETY: We have exclusive access to the next context (see above).
     #[cfg(miri)]
-    let miri_next_task: *const Task = Arc::as_ptr(&next_task);
+    let miri_next_thread = unsafe { (*next_task_ctx_ptr).kmiri_thread };
 
     let current_task_ptr = CURRENT_TASK_PTR.load();
     CURRENT_TASK_PTR.store(Arc::into_raw(next_task));
@@ -88,8 +88,8 @@ pub(super) fn switch_to_task(next_task: Arc<Task>, kind: SwitchKind) {
     };
 
     miri_println!(
-        "[switch_to_task] next_task_addr={:p}",
-        miri_next_task
+        "[switch_to_task] next_thread={}",
+        miri_next_thread
     );
 
     match kind {
@@ -98,7 +98,7 @@ pub(super) fn switch_to_task(next_task: Arc<Task>, kind: SwitchKind) {
             // Let the exiting entry return before the successor starts. It will
             // release PREVIOUS_TASK_PTR through its own after_switching_to call.
             unsafe {
-                crate::task::scheduler::miri_switch_to_after_return(miri_next_task);
+                crate::task::scheduler::miri_switch_to_after_return(miri_next_thread);
             }
         }
         SwitchKind::Resume => {
@@ -111,7 +111,7 @@ pub(super) fn switch_to_task(next_task: Arc<Task>, kind: SwitchKind) {
                 #[cfg(not(miri))]
                 task::context_switch(next_task_ctx_ptr, current_task_ctx_ptr);
                 #[cfg(miri)]
-                crate::task::scheduler::miri_switch_to(miri_next_task);
+                crate::task::scheduler::miri_switch_to(miri_next_thread);
             }
 
             // SAFETY: The task just switched back; cleanup has not run yet.

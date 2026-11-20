@@ -521,17 +521,20 @@ pub fn kernel_task_entry(_temp: usize) {
 #[expect(missing_docs)]
 unsafe extern "Rust" {
     // FIXME: remove the `arg` input and make func take nothing
+    /// Creates a KMiri thread for a new task and returns its id, which the
+    /// caller stores in the task's context.
     pub fn miri_create_new_thread(
         func: fn(usize),
         arg: usize,
-        task: &Task,
         stack_end: usize,
         stack_size: usize,
-    );
+    ) -> usize;
 
-    pub fn miri_switch_to(task: *const Task);
+    /// Switches to the KMiri thread whose id was read from the next task's context.
+    pub fn miri_switch_to(thread: usize);
 
-    pub fn miri_switch_to_after_return(task: *const Task);
+    /// Like `miri_switch_to`, after the current (exiting) task's entry returns.
+    pub fn miri_switch_to_after_return(thread: usize);
 
     pub fn miri_load_cpu_local(addr: *const u8) -> *const u8;
 }
@@ -541,6 +544,25 @@ unsafe extern "Rust" {
 /// Note that the new task is not guaranteed to run at once.
 #[track_caller]
 pub(super) fn run_new_task(runnable: Arc<Task>) {
+    // Create the KMiri thread before the scheduler can see the task, and record
+    // it in the task's context, as native code sets up the context in
+    // `TaskOptions::build`.
+    #[cfg(miri)]
+    {
+        // SAFETY: The thread starts at `kernel_task_entry` on this task's kernel stack.
+        let thread = unsafe {
+            miri_create_new_thread(
+                kernel_task_entry,
+                0,
+                runnable.kstack.end_vaddr(),
+                super::kernel_stack::KERNEL_STACK_SIZE,
+            )
+        };
+        // SAFETY: The task has not been handed to the scheduler, so nothing else
+        // accesses its context.
+        unsafe { (*runnable.ctx().get()).kmiri_thread = thread };
+    }
+
     let preempt_cpu = scheduler_singleton().enqueue(runnable.clone(), EnqueueFlags::Spawn);
 
     // FIXME: need to handle multi-cpu switch/preempt.
@@ -550,17 +572,6 @@ pub(super) fn run_new_task(runnable: Arc<Task>) {
         "unnable.kstack.end_vaddr=0x{stack_end:x} stack_size=0x{stack_size:x} stack_range=0x{:x}..0x{stack_end:x}",
         stack_end - stack_size,
     );
-    #[cfg(miri)]
-    unsafe {
-        miri_create_new_thread(
-            kernel_task_entry,
-            0,
-            &runnable,
-            runnable.kstack.end_vaddr(),
-            super::kernel_stack::KERNEL_STACK_SIZE,
-        );
-    }
-
     if let Some(preempt_cpu_id) = preempt_cpu {
         set_need_preempt(preempt_cpu_id);
     }

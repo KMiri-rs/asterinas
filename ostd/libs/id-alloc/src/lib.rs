@@ -10,7 +10,9 @@ use bitvec::prelude::BitVec;
 #[cfg(miri)]
 use miri_bitvec::BitVec;
 
-#[cfg(miri)]
+// Also built for unit tests, which check it against `bitvec`.
+#[cfg(any(miri, test))]
+#[cfg_attr(not(miri), allow(dead_code))]
 mod miri_bitvec;
 
 /// An id allocator implemented by the bitmap.

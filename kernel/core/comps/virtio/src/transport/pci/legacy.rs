@@ -3,10 +3,12 @@
 use alloc::{boxed::Box, sync::Arc};
 use core::fmt::Debug;
 
-use aster_pci::{cfg_space::BarAccess, common_device::PciCommonDevice};
+use aster_pci::{
+    bus::{PciDevice, PciDeviceExt},
+    cfg_space::BarAccess,
+};
 use aster_util::safe_ptr::SafePtr;
 use ostd::{
-    bus::BusProbeError,
     info,
     io::IoMem,
     irq::IrqCallbackFunction,
@@ -61,21 +63,18 @@ const QUEUE_MSIX_VECTOR_OFFSET: usize = 0x16;
 const DEVICE_CONFIG_OFFSET: usize = 0x14;
 const DEVICE_CONFIG_OFFSET_WITH_MSIX: usize = 0x18;
 
-pub struct VirtioPciLegacyTransport {
+pub(crate) struct VirtioPciLegacyTransport {
     device_type: VirtioDeviceType,
-    common_device: PciCommonDevice,
+    common_device: Arc<PciDevice>,
     config_bar: BarAccess,
     num_queues: u16,
     msix_manager: VirtioMsixManager,
 }
 
 impl VirtioPciLegacyTransport {
-    pub const QUEUE_ALIGN_SIZE: usize = 4096;
+    pub(crate) const QUEUE_ALIGN_SIZE: usize = 4096;
 
-    #[expect(clippy::result_large_err)]
-    pub(super) fn new(
-        mut common_device: PciCommonDevice,
-    ) -> Result<Self, (BusProbeError, PciCommonDevice)> {
+    pub(super) fn new(common_device: Arc<PciDevice>) -> Result<Self, aster_device::common::Error> {
         let device_type = match common_device.device_id().device_id {
             0x1000 => VirtioDeviceType::Network,
             0x1001 => VirtioDeviceType::Block,
@@ -89,14 +88,14 @@ impl VirtioPciLegacyTransport {
                     "Unrecognized virtio-pci device ID: {:x?}",
                     common_device.device_id().device_id
                 );
-                return Err((BusProbeError::ConfigurationSpaceError, common_device));
+                return Err(aster_device::common::Error::ProbeFailed);
             }
         };
         info!("Found device: {:?}", device_type);
 
         let config_bar = common_device
-            .bar_manager_mut()
-            .bar_mut(0)
+            .bar_manager()
+            .bar(0)
             .unwrap()
             .acquire()
             .unwrap();
@@ -115,7 +114,7 @@ impl VirtioPciLegacyTransport {
 
         // TODO: Support interrupt without MSI-X.
         let Ok(Some(msix)) = common_device.acquire_msix_capability() else {
-            return Err((BusProbeError::ConfigurationSpaceError, common_device));
+            return Err(aster_device::common::Error::ResourceUnavailable);
         };
         let msix_manager = VirtioMsixManager::new(msix);
 
@@ -272,7 +271,7 @@ impl VirtioTransport for VirtioPciLegacyTransport {
             } else {
                 warn!(
                     "{:?}: `single_interrupt` ignored: no more IRQ lines available",
-                    self.device_type()
+                    self.device_type
                 );
                 self.msix_manager.shared_irq_line()
             }

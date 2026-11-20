@@ -45,7 +45,7 @@ using the Asterinas NixOS installer ISO.
 
     ```bash
     # The capacity of the disk is 10GB; adjust it as you see fit
-    dd if=/dev/zero of=aster_nixos_disk.img bs=1G count=10
+    truncate -s 10G aster_nixos_disk.img
     ```
 
 5. Start an x86-64 VM with two drives:
@@ -142,6 +142,9 @@ generate a disk image with Asterinas NixOS installed using this command:
     (see the [previous section](#end-users))
     by running a VM.
     Using either method results in a disk image with an Asterinas NixOS installation.
+    In the [Nix development shell](../kernel/nix-development.md),
+    only the second method works,
+    because `make nixos` needs root privileges to set up a loop device.
 
 3. Start a VM to run the installed Asterinas NixOS:
 

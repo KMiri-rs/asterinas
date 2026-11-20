@@ -207,13 +207,12 @@ RUN curl https://sh.rustup.rs -sSf | \
         sh -s -- --default-toolchain ${ASTER_RUST_VERSION} -y \
     && rm -rf /root/.cargo/registry && rm -rf /root/.cargo/git \
     && cargo -V \
-    && rustup component add rust-src rustc-dev llvm-tools-preview
-
-# Let Github runners reuse the Rust toolchain installed in the Dockerfile and
-# also the Cargo crates downloaded subsequently in the Docker build process.
-RUN mkdir -p /github/home \
-    && ln -s /root/.cargo /github/home/.cargo \
-    && ln -s /root/.rustup /github/home/.rustup
+    && rustup component add rust-src rustc-dev llvm-tools-preview \
+    && rustup target add \
+        x86_64-unknown-none \
+        riscv64imac-unknown-none-elf \
+        loongarch64-unknown-none-softfloat \
+        aarch64-unknown-none-softfloat
 
 # Install cargo tools
 RUN cargo install --locked \
@@ -226,7 +225,7 @@ RUN cargo install --locked \
     typos-cli@1.39.0
 
 # Install klint. Pin the Klint commit compatible with the Asterinas toolchain.
-RUN cargo install klint --git https://github.com/Rust-for-Linux/klint --rev d2a4d60
+RUN cargo install klint --git https://github.com/Rust-for-Linux/klint --rev 3b092315
 
 # Install QEMU built from the previous stages
 COPY --from=qemu /usr/local/qemu /usr/local/qemu

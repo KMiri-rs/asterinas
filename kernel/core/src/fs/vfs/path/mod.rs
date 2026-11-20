@@ -6,9 +6,13 @@ use core::time::Duration;
 
 pub(crate) use dentry::Dentry;
 use inherit_methods_macro::inherit_methods;
-pub(crate) use mount::{MNT_UNIQUE_ID_MIN, Mount, MountPropType, PerMountFlags};
-use mount::{MountNsFileCopying, MountTopology};
+use mount::MountTreeCloneMode;
+pub(crate) use mount::{MNT_UNIQUE_ID_MIN, Mount, PerMountFlags};
+pub(in crate::fs) use mount::{RecyclableMountId, UniqueMountId};
 pub(crate) use mount_namespace::MountNamespace;
+pub(crate) use mount_propagation::MountPropType;
+pub(in crate::fs) use mount_propagation::MountTopology;
+use mount_propagation::PendingPropagationChanges;
 pub(crate) use resolver::{
     AT_FDCWD, AbsPathResult, EmptyPathStr, FsPath, LookupResult, PathResolver, SplitPath,
     SplitPathError,
@@ -24,6 +28,7 @@ use crate::{
         vfs::{
             file_system::{FileSystem, FsFlags},
             inode::{HardLinkability, Inode, Metadata, MknodType, RenameMode},
+            notify,
             registry::FsAndRoot,
             xattr::{self, XattrName, XattrNamespace, XattrSetFlags},
         },
@@ -38,6 +43,7 @@ use crate::{
 mod dentry;
 mod mount;
 mod mount_namespace;
+mod mount_propagation;
 mod resolver;
 
 /// A `Path` is used to represent an exact location in the VFS tree.
@@ -179,12 +185,6 @@ impl Path {
             );
         }
 
-        if inode_type == InodeType::SymLink
-            && creation_flags.contains(CreationFlags::O_NOFOLLOW)
-            && !status_flags.contains(StatusFlags::O_PATH)
-        {
-            return_errno_with_message!(Errno::ELOOP, "the file is a symlink");
-        }
         if creation_flags.contains(CreationFlags::O_DIRECTORY) && inode_type != InodeType::Dir {
             return_errno_with_message!(
                 Errno::ENOTDIR,
@@ -192,14 +192,192 @@ impl Path {
             );
         }
 
-        if inode_type.is_regular_file()
-            && creation_flags.contains(CreationFlags::O_TRUNC)
-            && !status_flags.contains(StatusFlags::O_PATH)
-        {
-            self.resize(0)?;
+        if status_flags.contains(StatusFlags::O_PATH) {
+            return InodeHandle::new(self.clone(), open_args.access_mode, *status_flags);
+        }
+
+        if inode_type == InodeType::SymLink && creation_flags.contains(CreationFlags::O_NOFOLLOW) {
+            return_errno_with_message!(Errno::ELOOP, "the file is a symlink");
+        }
+
+        if inode_type.is_regular_file() {
+            if open_args.access_mode.is_writable() {
+                self.check_mount_writable()?;
+            }
+            if creation_flags.contains(CreationFlags::O_TRUNC) {
+                self.resize(0)?;
+            }
         }
 
         InodeHandle::new(self.clone(), open_args.access_mode, *status_flags)
+    }
+
+    /// Changes the mode after checking mount writability and the caller's permissions.
+    pub(crate) fn chmod(&self, mut mode: InodeMode, ctx: &Context) -> Result<()> {
+        self.check_mount_writable()?;
+
+        // FIXME: Keep the ownership checks and mode update in one inode critical
+        // section. `metadata()` returns a snapshot, so a concurrent `chown()` can
+        // change the owner or group before `set_mode()` runs.
+        let metadata = self.metadata()?;
+        let credentials = ctx.posix_thread.credentials();
+        let user_ns = ctx.thread_local.borrow_user_ns();
+
+        if credentials.fsuid() != metadata.uid {
+            lsm_hooks::on_capable(lsm_hooks::CapableContext::new(
+                user_ns.as_ref(),
+                ctx.posix_thread,
+                CapSet::FOWNER,
+            ))?;
+        }
+
+        // If the caller is not in the file's group and lacks `CAP_FSETID`,
+        // Linux silently clears the requested `S_ISGID` bit.
+        // Reference: <https://man7.org/linux/man-pages/man2/chmod.2.html>.
+        if mode.contains(InodeMode::S_ISGID)
+            && !credentials.has_group_for_fs_access(metadata.gid)
+            && lsm_hooks::on_capable(lsm_hooks::CapableContext::new(
+                user_ns.as_ref(),
+                ctx.posix_thread,
+                CapSet::FSETID,
+            ))
+            .is_err()
+        {
+            mode.remove(InodeMode::S_ISGID);
+        }
+
+        self.set_mode(mode)?;
+        notify::on_attr_change(self);
+        Ok(())
+    }
+
+    /// Changes the owner and/or group after checking mount writability and permissions.
+    ///
+    /// An ID of `None` leaves that ID unchanged.
+    /// A successful call on a non-directory clears the set-user-ID bit, even if
+    /// neither ID changes.
+    /// The set-group-ID bit is preserved only if the file is not group-executable
+    /// and the caller belongs to its group or has `CAP_FSETID`.
+    /// Clearing these bits requires the caller to own the file or have `CAP_FOWNER`.
+    pub(crate) fn chown(&self, uid: Option<Uid>, gid: Option<Gid>, ctx: &Context) -> Result<()> {
+        self.check_mount_writable()?;
+
+        // FIXME: Keep the ownership checks and owner, group, and mode updates in
+        // one inode critical section. `metadata()` returns a snapshot, so concurrent
+        // attribute changes can invalidate the checks before the updates run.
+        let metadata = self.metadata()?;
+        let credentials = ctx.posix_thread.credentials();
+        let user_ns = ctx.thread_local.borrow_user_ns();
+        let is_owner = credentials.fsuid() == metadata.uid;
+
+        // The owner may keep either ID or move the file into one of its groups.
+        // Other ownership changes require `CAP_CHOWN`.
+        let needs_cap_chown = uid.is_some_and(|uid| !is_owner || uid != metadata.uid)
+            || gid.is_some_and(|gid| {
+                !is_owner || (gid != metadata.gid && !credentials.has_group_for_fs_access(gid))
+            });
+        if needs_cap_chown {
+            lsm_hooks::on_capable(lsm_hooks::CapableContext::new(
+                user_ns.as_ref(),
+                ctx.posix_thread,
+                CapSet::CHOWN,
+            ))?;
+        }
+
+        // Directories retain their set-ID bits because set-group-ID controls
+        // group inheritance for newly created children.
+        let mut mode = metadata.mode;
+        if !matches!(self.type_(), InodeType::Dir) {
+            mode.remove(InodeMode::S_ISUID);
+            if mode.has_set_gid() {
+                let keeps_set_gid = !mode.is_group_executable()
+                    && (credentials.has_group_for_fs_access(metadata.gid)
+                        || lsm_hooks::on_capable(lsm_hooks::CapableContext::new(
+                            user_ns.as_ref(),
+                            ctx.posix_thread,
+                            CapSet::FSETID,
+                        ))
+                        .is_ok());
+                if !keeps_set_gid {
+                    mode.remove(InodeMode::S_ISGID);
+                }
+            }
+        }
+
+        if mode != metadata.mode {
+            // Clearing set-ID bits requires permission to change the file mode.
+            let may_change_mode = is_owner
+                || lsm_hooks::on_capable(lsm_hooks::CapableContext::new(
+                    user_ns.as_ref(),
+                    ctx.posix_thread,
+                    CapSet::FOWNER,
+                ))
+                .is_ok();
+            if !may_change_mode {
+                return_errno_with_message!(Errno::EPERM, "the file mode cannot be changed");
+            }
+            self.set_mode(mode)?;
+        }
+
+        if let Some(uid) = uid {
+            self.set_owner(uid)?;
+        }
+        if let Some(gid) = gid {
+            self.set_group(gid)?;
+        }
+        notify::on_attr_change(self);
+        Ok(())
+    }
+
+    /// Updates inode timestamps after checking mount and caller permissions.
+    ///
+    /// A touch request sets both atime and mtime to the current time. Linux
+    /// permits it for the inode owner, a caller with `CAP_FOWNER`, or a caller
+    /// with write permission. Any other timestamp update requires ownership or
+    /// `CAP_FOWNER`.
+    pub(crate) fn update_times(&self, update: TimestampUpdate, ctx: &Context) -> Result<()> {
+        self.check_mount_writable()?;
+
+        // FIXME: Keep this check and the timestamp updates in one inode critical
+        // section. `metadata()` returns a snapshot, so a concurrent `chown()` can
+        // change the owner before the updates run.
+        let metadata = self.metadata()?;
+        let credentials = ctx.posix_thread.credentials();
+        let is_owner = credentials.fsuid() == metadata.uid;
+
+        if !is_owner {
+            let has_fowner = lsm_hooks::on_capable(lsm_hooks::CapableContext::new(
+                ctx.thread_local.borrow_user_ns().as_ref(),
+                ctx.posix_thread,
+                CapSet::FOWNER,
+            ))
+            .is_ok();
+
+            if !has_fowner {
+                if matches!(update, TimestampUpdate::Touch(_)) {
+                    self.inode().check_permission(Permission::MAY_WRITE)?;
+                } else {
+                    return_errno_with_message!(
+                        Errno::EPERM,
+                        "only the owner may set explicit timestamps"
+                    );
+                }
+            }
+        }
+
+        let (atime, mtime, ctime) = match update {
+            TimestampUpdate::Touch(now) => (Some(now), Some(now), now),
+            TimestampUpdate::Explicit { atime, mtime, now } => (atime, mtime, now),
+        };
+        if let Some(atime) = atime {
+            self.set_atime(atime);
+        }
+        if let Some(mtime) = mtime {
+            self.set_mtime(mtime);
+        }
+        self.set_ctime(ctime);
+        notify::on_attr_change(self);
+        Ok(())
     }
 
     /// Gets the parent `Path` within the same mount.
@@ -290,6 +468,16 @@ impl Path {
         self.clone()
     }
 
+    /// Checks whether this path is a searchable directory.
+    fn check_dir_search_permission(&self) -> Result<()> {
+        if self.type_() != InodeType::Dir {
+            return_errno_with_message!(Errno::ENOTDIR, "only directories are searchable");
+        }
+
+        self.inode()
+            .check_permission(Permission::MAY_EXEC | Permission::MAY_CHDIR)
+    }
+
     /// Checks whether the path is on a writable mount and filesystem.
     fn check_mount_writable(&self) -> Result<()> {
         if self.mount.flags().contains(PerMountFlags::RDONLY)
@@ -363,6 +551,18 @@ impl Path {
     }
 }
 
+/// A timestamp update and its associated permission policy.
+pub(crate) enum TimestampUpdate {
+    /// Set both timestamps to the current time.
+    Touch(Duration),
+    /// Set supplied timestamps, leaving omitted fields unchanged.
+    Explicit {
+        atime: Option<Duration>,
+        mtime: Option<Duration>,
+        now: Duration,
+    },
+}
+
 fn try_get_mnt_ns_inode(dentry: &Dentry) -> Option<&NsInode<MountNamespace>> {
     dentry
         .inode()
@@ -403,7 +603,7 @@ impl Path {
         }
 
         let current_ns_proxy = ctx.thread_local.borrow_ns_proxy();
-        let current_mnt_ns = current_ns_proxy.unwrap().mnt_ns();
+        let current_mnt_ns = current_ns_proxy.mnt_ns();
         if !current_mnt_ns.owns(&self.mount) {
             return_errno_with_message!(Errno::EINVAL, "the path is not in this mount namespace");
         }
@@ -438,7 +638,7 @@ impl Path {
         };
 
         let current_ns_proxy = ctx.thread_local.borrow_ns_proxy();
-        let current_mnt_ns = current_ns_proxy.unwrap().mnt_ns();
+        let current_mnt_ns = current_ns_proxy.mnt_ns();
         if !current_mnt_ns.owns(&self.mount) {
             return_errno_with_message!(Errno::EINVAL, "the path is not in this mount namespace");
         }
@@ -477,7 +677,7 @@ impl Path {
         };
 
         let current_ns_proxy = ctx.thread_local.borrow_ns_proxy();
-        let current_mnt_ns = current_ns_proxy.unwrap().mnt_ns();
+        let current_mnt_ns = current_ns_proxy.mnt_ns();
         if !current_mnt_ns.owns(&self.mount) {
             return_errno_with_message!(Errno::EINVAL, "the path is not in this mount namespace");
         }
@@ -492,6 +692,10 @@ impl Path {
     /// Creates a new mount tree that mirrors either the root mount (non-recursive)
     /// or the entire mount subtree (recursive), and attaches it to the destination path.
     ///
+    /// A recursive bind omits unbindable subtrees.
+    /// If the destination parent is shared,
+    /// the new tree is also attached below its propagation receivers.
+    ///
     /// # Errors
     ///
     /// Returns `ENOTDIR` if one of the source and destination is a directory
@@ -500,9 +704,10 @@ impl Path {
     /// Returns `EINVAL` if any of the following holds:
     /// - The destination path is not in the current mount namespace.
     /// - The source path is a mount namespace file that would create a namespace loop.
+    /// - The source mount is unbindable.
     pub(crate) fn bind_mount_to(
         &self,
-        dst_path: &Self,
+        dst_path: Self,
         recursive: bool,
         ctx: &Context,
     ) -> Result<()> {
@@ -519,7 +724,7 @@ impl Path {
         }
 
         let current_ns_proxy = ctx.thread_local.borrow_ns_proxy();
-        let current_mnt_ns = current_ns_proxy.unwrap().mnt_ns();
+        let current_mnt_ns = current_ns_proxy.mnt_ns();
 
         // Linux does not require the source path to belong to the current
         // mount namespace, but still rejects source mount namespace files that
@@ -539,18 +744,25 @@ impl Path {
 
         let mut topology_guard = MountTopology::write_lock();
         let current_mnt_ns_weak = Arc::downgrade(current_mnt_ns);
-        let new_mount = self.mount.clone_mount_tree(
+        let mut pending_changes = PendingPropagationChanges::default();
+        let new_mount = self.mount.clone_mount_tree_deferred(
             &self.dentry,
             &current_mnt_ns_weak,
             recursive,
-            MountNsFileCopying::Copy,
+            MountTreeCloneMode::Bind,
+            &mut pending_changes,
             &topology_guard,
         )?;
-        new_mount.graft_mount_tree(dst_path, &mut topology_guard);
+        let attachment =
+            new_mount.prepare_mount_tree_attachment(dst_path, pending_changes, &topology_guard)?;
+        attachment.attach(&mut topology_guard);
         Ok(())
     }
 
     /// Moves a mount tree from the current path to the destination path.
+    ///
+    /// If the destination parent is shared,
+    /// corresponding clones are also attached below its propagation receivers.
     ///
     /// # Errors
     ///
@@ -561,17 +773,20 @@ impl Path {
     /// - The destination is in a detached mount tree while the source is not.
     /// - The source and destination are in the same detached mount tree.
     /// - One of the source and destination is a directory and the other is not.
+    /// - The source mount's current parent is shared.
+    /// - The destination mount is shared and the source tree contains an
+    ///   unbindable mount.
     ///
     /// Returns `ELOOP` in the following cases:
     /// - The destination path is inside the subtree being moved.
     /// - The mount tree contains a mount namespace file that would create a namespace loop.
-    pub(crate) fn move_mount_to(&self, dst_path: &Self, ctx: &Context) -> Result<()> {
+    pub(crate) fn move_mount_to(&self, dst_path: Self, ctx: &Context) -> Result<()> {
         if !self.is_mount_root() {
             return_errno_with_message!(Errno::EINVAL, "the path is not a mount root");
         };
 
         let current_ns_proxy = ctx.thread_local.borrow_ns_proxy();
-        let current_mnt_ns = current_ns_proxy.unwrap().mnt_ns();
+        let current_mnt_ns = current_ns_proxy.mnt_ns();
         if self.mount.id() == current_mnt_ns.root().id() {
             return_errno_with_message!(Errno::EINVAL, "the root mount can not be moved");
         }
@@ -589,8 +804,8 @@ impl Path {
         }
 
         let mut topology_guard = MountTopology::write_lock();
-        let source_tree_root = mount_tree_root(self.mount_node());
-        let target_tree_root = mount_tree_root(dst_path.mount_node());
+        let source_tree_root = mount_tree_root(self.mount_node(), &topology_guard);
+        let target_tree_root = mount_tree_root(dst_path.mount_node(), &topology_guard);
         let current_tree_root = current_mnt_ns.root();
         let source_is_detached = source_tree_root.id() != current_tree_root.id();
         let target_is_detached = target_tree_root.id() != current_tree_root.id();
@@ -641,14 +856,51 @@ impl Path {
                 "the destination path is inside the mount subtree being moved"
             );
         }
+        if self
+            .mount
+            .parent()
+            .and_then(|parent| parent.upgrade())
+            .is_some_and(|parent| parent.is_shared())
+        {
+            return_errno_with_message!(
+                Errno::EINVAL,
+                "moving a mount under a shared parent is not supported"
+            );
+        }
+        if dst_path.mount_node().is_shared() {
+            self.mount.try_walk_tree(|mount| {
+                if mount.is_unbindable() {
+                    return_errno_with_message!(
+                        Errno::EINVAL,
+                        "an unbindable mount tree cannot be moved under a shared mount"
+                    );
+                }
+                Ok(())
+            })?;
+        }
 
-        self.mount.graft_mount_tree(dst_path, &mut topology_guard);
+        let pending_changes = PendingPropagationChanges::default();
+        let attachment =
+            self.mount
+                .prepare_mount_tree_attachment(dst_path, pending_changes, &topology_guard)?;
+        attachment.attach(&mut topology_guard);
 
         Ok(())
     }
 
-    /// Sets the propagation type of the mount of this `Path`.
-    pub(crate) fn set_mount_propagation(
+    /// Sets the propagation policy of this path's mount.
+    ///
+    /// If `recursive` is `true`,
+    /// the same requested transition is applied independently
+    /// to every mount in the subtree.
+    ///
+    /// # Errors
+    ///
+    /// Returns `EINVAL` if this path is not a mount root
+    /// or its mount does not belong to the current mount namespace.
+    /// Returns `ENOMEM` if the transition requires a new peer group
+    /// and the peer-group ID pool is exhausted.
+    pub(crate) fn set_propagation(
         &self,
         prop: MountPropType,
         recursive: bool,
@@ -659,20 +911,25 @@ impl Path {
         };
 
         let current_ns_proxy = ctx.thread_local.borrow_ns_proxy();
-        let current_mnt_ns = current_ns_proxy.unwrap().mnt_ns();
+        let current_mnt_ns = current_ns_proxy.mnt_ns();
         if !current_mnt_ns.owns(&self.mount) {
             return_errno_with_message!(Errno::EINVAL, "the path is not in this mount namespace");
         }
 
         let mut topology_guard = MountTopology::write_lock();
-        self.mount
-            .set_propagation(prop, recursive, &mut topology_guard);
-
+        let mut pending_changes = PendingPropagationChanges::default();
+        self.mount.set_propagation_deferred(
+            prop,
+            recursive,
+            &mut pending_changes,
+            &topology_guard,
+        )?;
+        pending_changes.commit(&mut topology_guard);
         Ok(())
     }
 }
 
-fn mount_tree_root(mount: &Arc<Mount>) -> Arc<Mount> {
+fn mount_tree_root(mount: &Arc<Mount>, _topology: &MountTopology) -> Arc<Mount> {
     let mut root = mount.clone();
     while let Some(parent) = root.parent().and_then(|parent| parent.upgrade()) {
         root = parent;
@@ -744,6 +1001,9 @@ impl Path {
 
         old_dir_dentry.rename(old_name, &new_dir_dentry, new_name, mode)
     }
+
+    // This `impl` block should only contain methods that are inherited from `Dentry`.
+    // Do not add any unrelated methods.
 }
 
 // Methods inherited from `Inode`.
@@ -765,27 +1025,45 @@ impl Path {
         list_writer: &mut VmWriter,
     ) -> Result<usize>;
 
-    pub(crate) fn set_mode(&self, mode: InodeMode) -> Result<()> {
+    /// Sets the file's mode.
+    ///
+    /// Use [`Self::chmod`] instead, which will perform permission checks.
+    fn set_mode(&self, mode: InodeMode) -> Result<()> {
         self.inode().set_mode(&self.dentry, mode)
     }
 
-    pub(crate) fn set_owner(&self, uid: Uid) -> Result<()> {
+    /// Sets the file's owner.
+    ///
+    /// Use [`Self::chown`] instead, which will perform permission checks.
+    fn set_owner(&self, uid: Uid) -> Result<()> {
         self.inode().set_owner(&self.dentry, uid)
     }
 
-    pub(crate) fn set_group(&self, gid: Gid) -> Result<()> {
+    /// Sets the file's group.
+    ///
+    /// Use [`Self::chown`] instead, which will perform permission checks.
+    fn set_group(&self, gid: Gid) -> Result<()> {
         self.inode().set_group(&self.dentry, gid)
     }
 
-    pub(crate) fn set_atime(&self, time: Duration) {
+    /// Sets the file's access time.
+    ///
+    /// Use [`Self::update_times`] instead, which will perform permission checks.
+    fn set_atime(&self, time: Duration) {
         self.inode().set_atime(&self.dentry, time)
     }
 
-    pub(crate) fn set_mtime(&self, time: Duration) {
+    /// Sets the file's modification time.
+    ///
+    /// Use [`Self::update_times`] instead, which will perform permission checks.
+    fn set_mtime(&self, time: Duration) {
         self.inode().set_mtime(&self.dentry, time)
     }
 
-    pub(crate) fn set_ctime(&self, time: Duration) {
+    /// Sets the file's change time.
+    ///
+    /// Use [`Self::update_times`] instead, which will perform permission checks.
+    fn set_ctime(&self, time: Duration) {
         self.inode().set_ctime(&self.dentry, time)
     }
 
@@ -795,8 +1073,10 @@ impl Path {
         self.resize_unchecked_access(size)
     }
 
-    /// Resizes the file without permission checks.
+    /// Resizes the file without inode access checks, but requires a writable mount.
     pub(in crate::fs) fn resize_unchecked_access(&self, size: usize) -> Result<()> {
+        self.check_mount_writable()?;
+
         let inode = self.inode();
         xattr::clear_file_priv(&self.dentry)?;
         inode.resize(&self.dentry, size)
@@ -810,6 +1090,8 @@ impl Path {
         flags: XattrSetFlags,
         ctx: &Context,
     ) -> Result<()> {
+        self.check_mount_writable()?;
+
         let inode = self.inode();
         if name.full_name() == xattr::SECURITY_CAPABILITY_XATTR_NAME {
             capable_modify_file_cap(inode.as_ref(), ctx)?;
@@ -828,6 +1110,8 @@ impl Path {
 
     /// Removes an xattr of the file.
     pub(crate) fn remove_xattr(&self, name: XattrName, ctx: &Context) -> Result<()> {
+        self.check_mount_writable()?;
+
         let inode = self.inode();
         if name.full_name() == xattr::SECURITY_CAPABILITY_XATTR_NAME {
             capable_modify_file_cap(inode.as_ref(), ctx)?;
@@ -836,6 +1120,9 @@ impl Path {
         }
         inode.remove_xattr(&self.dentry, name)
     }
+
+    // This `impl` block should only contain methods that are inherited from `Inode`.
+    // Do not add any unrelated methods.
 }
 
 fn capable_modify_file_cap(inode: &dyn Inode, ctx: &Context) -> Result<()> {

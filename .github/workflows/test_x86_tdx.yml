@@ -11,7 +11,7 @@ jobs:
     runs-on: self-hosted
     strategy:
       matrix:
-        image: ['asterinas/kernel-dev:0.18.1-20260918', 'asterinas/osdk-dev:0.18.1-20260918']
+        image: ['asterinas/kernel-dev:0.19.0-20261012', 'asterinas/osdk-dev:0.19.0-20261012']
       fail-fast: false
     container:
       image: ${{ matrix.image }}
@@ -27,7 +27,7 @@ jobs:
   boot-test:
     runs-on: self-hosted
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
     strategy:
       fail-fast: false
@@ -46,11 +46,12 @@ jobs:
           boot_protocol: 'linux-efi-handover64'
           netdev: ${{ matrix.netdev || 'tap' }}
           smp: ${{ matrix.smp }}
+          restore_osdk_from_cache: true
 
   regression-test:
     runs-on: self-hosted
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
     strategy:
       fail-fast: false
@@ -69,11 +70,12 @@ jobs:
           boot_protocol: 'linux-efi-handover64'
           netdev: ${{ matrix.netdev || 'tap' }}
           smp: ${{ matrix.smp }}
+          restore_osdk_from_cache: true
 
   conformance-test:
     runs-on: self-hosted
     container:
-      image: asterinas/kernel-dev:0.18.1-20260918
+      image: asterinas/kernel-dev:0.19.0-20261012
       options: -v /dev:/dev --privileged
     strategy:
       fail-fast: false
@@ -101,3 +103,4 @@ jobs:
           conformance_test_suite: ${{ matrix.suite }}
           conformance_test_workdir: ${{ matrix.conformance_test_workdir }}
           conformance_test_extra_blocklists: ${{ matrix.conformance_test_extra_blocklists }}
+          restore_osdk_from_cache: true

@@ -159,6 +159,14 @@ impl<'a> FsCreationCtx<'a> {
         self.args
     }
 
+    /// Returns the task context the creation started from; `None` once a block device replaced it.
+    pub(in crate::fs) fn ctx(&self) -> Option<&'a Context<'a>> {
+        match &self.block_device {
+            BlockDeviceResolution::Pending(task_ctx) => Some(*task_ctx),
+            BlockDeviceResolution::Resolved(_) => None,
+        }
+    }
+
     /// Resolves the mount source into a block device.
     pub(in crate::fs) fn resolve_block_device(&mut self) -> Result<&Arc<dyn BlockDevice>> {
         if self.block_device().is_none() {
@@ -208,6 +216,7 @@ impl<'a> FsCreationCtx<'a> {
 
 bitflags! {
     /// The properties common to all FS instances.
+    #[derive(Clone, Copy, Debug)]
     pub(crate) struct FsProperties: u32 {
         /// Whether a FS needs to be backed by a disk.
         ///

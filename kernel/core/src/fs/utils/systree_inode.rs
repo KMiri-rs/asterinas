@@ -10,7 +10,7 @@ use aster_systree::{
 use crate::{
     fs::{
         file::{AccessMode, InodeMode, InodeType, PerOpenFileOps, StatusFlags, SyncMode, mkmod},
-        utils::DirentVisitor,
+        utils::{self, DirentVisitor},
         vfs::{
             file_system::{FileSystem, SuperBlock},
             inode::{
@@ -72,6 +72,7 @@ pub(in crate::fs) trait SysTreeInodeTy: Send + Sync + 'static {
 
     fn new_metadata(ino: u64, type_: InodeType, sb: &SuperBlock) -> Metadata {
         let now = RealTimeCoarseClock::get().read_time();
+        let (uid, gid) = utils::current_fs_ids();
         Metadata {
             ino,
             size: 0,
@@ -84,8 +85,8 @@ pub(in crate::fs) trait SysTreeInodeTy: Send + Sync + 'static {
             // The mode field in metadata will not be used
             mode: mkmod!(a=),
             nr_hard_links: 1,
-            uid: Uid::new_root(),
-            gid: Gid::new_root(),
+            uid,
+            gid,
             container_dev_id: sb.container_dev_id,
             self_dev_id: None,
             birth_at: None,
@@ -308,7 +309,7 @@ impl<KInode: SysTreeInodeTy + Send + Sync + 'static> FileOps for KInode {
         _status_flags: StatusFlags,
     ) -> Result<usize> {
         let SysTreeNodeKind::Attr(attr, leaf) = &self.node_kind() else {
-            return Err(Error::new(Errno::EINVAL));
+            return_errno!(Errno::EINVAL);
         };
 
         let len = leaf.read_attr_at(attr.name(), offset, buf)?;
@@ -323,7 +324,7 @@ impl<KInode: SysTreeInodeTy + Send + Sync + 'static> FileOps for KInode {
         _status_flags: StatusFlags,
     ) -> Result<usize> {
         let SysTreeNodeKind::Attr(attr, leaf) = &self.node_kind() else {
-            return Err(Error::new(Errno::EINVAL));
+            return_errno!(Errno::EINVAL);
         };
 
         let len = if offset == 0 {
@@ -482,10 +483,6 @@ impl<KInode: SysTreeInodeTy + Send + Sync + 'static> Inode for KInode {
         _type_: InodeType,
         mode: InodeMode,
     ) -> Result<Arc<dyn Inode>> {
-        if name.len() > super::NAME_MAX {
-            return_errno!(Errno::ENAMETOOLONG);
-        }
-
         let SysTreeNodeKind::Branch(branch_node) = &self.node_kind() else {
             return_errno_with_message!(Errno::ENOTDIR, "self is not a dir");
         };
@@ -497,14 +494,14 @@ impl<KInode: SysTreeInodeTy + Send + Sync + 'static> Inode for KInode {
             Self::new_branch_dir(
                 SysTreeNodeKind::Branch(branch_child),
                 Some(mode),
-                self.parent().clone(),
+                Arc::downgrade(&self.this()),
                 &sb,
             )
         } else {
             Self::new_leaf_dir(
                 SysTreeNodeKind::Leaf(new_child.cast_to_node().unwrap()),
                 Some(mode),
-                self.parent().clone(),
+                Arc::downgrade(&self.this()),
                 &sb,
             )
         };

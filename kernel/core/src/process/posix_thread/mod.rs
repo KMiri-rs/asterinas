@@ -25,7 +25,7 @@ use crate::{
         signal::{PauseReason, PollHandle, sig_mask::SigMask},
     },
     thread::{Thread, Tid},
-    time::{Timer, TimerManager, clocks::ProfClock, timer::TimerGuard},
+    time::{Timer, TimerManager, clocks::ProfClock, timer::TimerFn},
 };
 
 pub(crate) mod alien_access;
@@ -45,6 +45,8 @@ pub(crate) use exit::{do_exit, do_exit_group};
 pub(crate) use personality::Personality;
 pub use posix_thread_ext::AsPosixThread;
 pub(crate) use robust_list::RobustListHead;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use thread_local::SuppUserContext;
 pub(crate) use thread_local::{AsThreadLocal, FileTableRefMut, ThreadLocal};
 
 pub struct PosixThread {
@@ -61,7 +63,7 @@ pub struct PosixThread {
     credentials: Credentials,
 
     /// The file system information of the thread.
-    fs: RwMutex<Arc<ThreadFsInfo>>,
+    fs: RwMutex<Option<Arc<ThreadFsInfo>>>,
 
     // Files
     /// File table
@@ -135,14 +137,14 @@ impl PosixThread {
     }
 
     /// Returns a read guard to the filesystem information of the thread.
-    pub(crate) fn read_fs(&self) -> RwMutexReadGuard<'_, Arc<ThreadFsInfo>> {
+    pub(crate) fn read_fs(&self) -> RwMutexReadGuard<'_, Option<Arc<ThreadFsInfo>>> {
         self.fs.read()
     }
 
     /// Sets the filesystem information of the thread.
     pub(in crate::process) fn set_fs(&self, new_fs: Arc<ThreadFsInfo>) {
         let mut fs_lock = self.fs.write();
-        *fs_lock = new_fs;
+        *fs_lock = Some(new_fs);
     }
 
     pub(crate) fn file_table(&self) -> &Mutex<Option<RoArc<FileTable>>> {
@@ -276,18 +278,12 @@ impl PosixThread {
     }
 
     /// Creates a timer based on the profiling CPU clock of the current thread.
-    pub(crate) fn create_prof_timer<F>(&self, func: F) -> Arc<Timer>
-    where
-        F: Fn(TimerGuard) + Send + Sync + 'static,
-    {
+    pub(crate) fn create_prof_timer<F: TimerFn>(&self, func: F) -> Arc<Timer<F>> {
         self.prof_timer_manager.create_timer(func)
     }
 
     /// Creates a timer based on the user CPU clock of the current thread.
-    pub(crate) fn create_virtual_timer<F>(&self, func: F) -> Arc<Timer>
-    where
-        F: Fn(TimerGuard) + Send + Sync + 'static,
-    {
+    pub(crate) fn create_virtual_timer<F: TimerFn>(&self, func: F) -> Arc<Timer<F>> {
         self.virtual_timer_manager.create_timer(func)
     }
 

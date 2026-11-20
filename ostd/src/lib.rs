@@ -2,7 +2,9 @@
 
 #![doc = include_str!("../README.md")]
 #![feature(alloc_error_handler)]
-#![feature(allocator_api)]
+// KMiri: the KMiri toolchain (rustc 1.99-dev, 2026-09-13) predates the stabilization of
+// `core::alloc::AllocError`, which upstream relies on since nightly-2026-11-16.
+#![cfg_attr(miri, feature(allocator_api))]
 #![feature(btree_cursors)]
 #![feature(core_intrinsics)]
 #![feature(format_args_nl)]
@@ -13,6 +15,7 @@
 #![feature(sync_unsafe_cell)]
 #![cfg_attr(target_arch = "riscv64", feature(riscv_ext_intrinsics))]
 #![cfg_attr(target_arch = "x86_64", feature(iter_advance_by, macro_metavar_expr))]
+#![cfg_attr(target_arch = "aarch64", feature(iter_next_chunk))]
 #![expect(internal_features)]
 #![no_std]
 #![allow(missing_docs, unused, unsafe_op_in_unsafe_fn)]
@@ -67,7 +70,6 @@ macro_rules! miri_record {
 pub mod arch;
 
 pub mod boot;
-pub mod bus;
 pub mod console;
 pub mod cpu;
 mod error;
@@ -84,6 +86,9 @@ pub mod task;
 pub mod timer;
 pub mod user;
 pub mod util;
+
+#[cfg(target_arch = "x86_64")]
+pub mod vm;
 
 #[cfg(feature = "coverage")]
 mod coverage;

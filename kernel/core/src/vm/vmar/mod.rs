@@ -16,9 +16,13 @@ pub(crate) use self::{
     handle::VmarHandle,
     rmap::{Rmap, RmapEntry},
     vmar_impls::{
-        RssType, Vmar, map::VmarMapOffset, page_fault::PageFaultInfo, remap::RemapOldMappingAction,
+        RssType, Vmar,
+        map::{MmapMode, VmarMapOffset},
+        page_fault::PageFaultInfo,
+        remap::RemapOldMappingAction,
     },
 };
+pub use self::{vm_mapping::MapHandle, vmar_impls::map::FileMmapRequest};
 
 pub(crate) const VMAR_LOWEST_ADDR: Vaddr = 0x001_0000; // 64 KiB is the Linux configurable default
 pub(crate) const VMAR_CAP_ADDR: Vaddr = ostd::mm::MAX_USERSPACE_VADDR;

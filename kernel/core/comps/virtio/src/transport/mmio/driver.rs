@@ -2,7 +2,7 @@
 
 use alloc::{sync::Arc, vec::Vec};
 
-use ostd::{bus::BusProbeError, sync::SpinLock};
+use ostd::sync::SpinLock;
 
 use super::{
     bus::{
@@ -13,12 +13,12 @@ use super::{
 };
 
 #[derive(Debug)]
-pub struct VirtioMmioDriver {
+pub(crate) struct VirtioMmioDriver {
     devices: SpinLock<Vec<VirtioMmioTransport>>,
 }
 
 impl VirtioMmioDriver {
-    pub fn pop_device_transport(&self) -> Option<VirtioMmioTransport> {
+    pub(crate) fn pop_device_transport(&self) -> Option<VirtioMmioTransport> {
         self.devices.lock().pop()
     }
 
@@ -33,10 +33,10 @@ impl MmioDriver for VirtioMmioDriver {
     fn probe(
         &self,
         device: MmioCommonDevice,
-    ) -> Result<Arc<dyn MmioDevice>, (BusProbeError, MmioCommonDevice)> {
-        let device = VirtioMmioTransport::new(device);
-        let mmio_device = device.mmio_device().clone();
-        self.devices.lock().push(device);
+    ) -> Result<Arc<dyn MmioDevice>, (aster_device::common::Error, MmioCommonDevice)> {
+        let transport = VirtioMmioTransport::new(device)?;
+        let mmio_device = transport.mmio_device().clone();
+        self.devices.lock().push(transport);
         Ok(mmio_device)
     }
 }

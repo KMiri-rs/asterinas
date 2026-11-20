@@ -8,7 +8,6 @@ pub(crate) use util::{
 
 use crate::mm::{
     PAGE_SIZE, Paddr, PagingConstsTrait, PagingLevel, PodOnce, Vaddr,
-    dma::DmaDirection,
     page_prop::{
         CachePolicy, PageFlags, PageProperty, PageTableFlags, PrivilegedPageFlags as PrivFlags,
     },
@@ -31,42 +30,41 @@ impl PagingConstsTrait for PagingConsts {
 
 bitflags::bitflags! {
     /// Possible flags for a page table entry.
-    #[repr(C)]
-    #[derive(Pod)]
+    #[derive(Clone, Copy, Debug)]
     pub(crate) struct PteFlags: usize {
         /// Specifies whether the mapped frame or page table is valid.
-        const VALID =           1 << 0;
+        const VALID           = 1 << 0;
         /// Specifies whether the mapping does not point to a huge frame; this bit must also be set
         /// for all the valid last-level entries.
-        const NON_HUGE =        1 << 1;
+        const NON_HUGE        = 1 << 1;
         /// Controls whether accesses from userspace (i.e. EL0) are permitted.
-        const USER =            1 << 6;
+        const USER            = 1 << 6;
         /// Controls whether writes to the mapped frames are disallowed.
-        const NO_WRITE =        1 << 7;
+        const NO_WRITE        = 1 << 7;
         /// Whether the memory area represented by this entry is accessed.
-        const ACCESSED =        1 << 10;
+        const ACCESSED        = 1 << 10;
         /// Indicates that the mapping isn't present in all address spaces, so it is flushed from
         /// the TLB on an address space switch.
-        const NON_GLOBAL =      1 << 11;
+        const NON_GLOBAL      = 1 << 11;
 
         /// Whether the memory area represented by this entry is modified.
-        const DIRTY =           1 << 51;
+        const DIRTY           = 1 << 51;
         /// Forbid execute codes on the page from kernel space (i.e. EL1).
         const NO_EXECUTE_KERN = 1 << 53;
         /// Forbid execute codes on the page from userspace (i.e. EL0).
         const NO_EXECUTE_USER = 1 << 54;
 
         /// Ignored by the hardware. Free to use.
-        const HIGH_IGN1 =       1 << 55;
+        const HIGH_IGN1       = 1 << 55;
         /// Ignored by the hardware. Free to use.
-        const HIGH_IGN2 =       1 << 56;
+        const HIGH_IGN2       = 1 << 56;
 
         // Be careful that the following fields contain multiple bits!
         //
         /// Bit 2-4: Device memory, nGnRnE.
-        const ATTR_DEVICE =     1 << 2;
+        const ATTR_DEVICE     = 1 << 2;
         /// Bit 8-9: Inner shareability (effective only for Normal memory).
-        const SH_INNER =        3 << 8;
+        const SH_INNER        = 3 << 8;
     }
 }
 
@@ -119,7 +117,7 @@ pub(crate) fn tlb_flush_all_including_global() {
 }
 
 pub(crate) fn can_sync_dma() -> bool {
-    false
+    true
 }
 
 /// # Safety
@@ -128,9 +126,43 @@ pub(crate) fn can_sync_dma() -> bool {
 ///  - the virtual address range and DMA direction correspond correctly to a
 ///    DMA region;
 ///  - `can_sync_dma()` is `true`.
-#[expect(clippy::extra_unused_type_parameters)]
-pub(crate) unsafe fn sync_dma_range<D: DmaDirection>(_range: Range<Vaddr>) {
-    unreachable!("`can_sync_dma()` never returns `true`");
+pub(crate) unsafe fn sync_dma_range(mut range: Range<Vaddr>, is_from_device: bool) {
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    static CACHE_LINE_SIZE: AtomicUsize = AtomicUsize::new(0);
+
+    let mut cache_line_size = CACHE_LINE_SIZE.load(Ordering::Relaxed);
+    if cache_line_size == 0 {
+        let dmin_line = {
+            let ctr: usize;
+            // SAFETY: It is safe to read the Cache Type Register (CTR).
+            unsafe { asm!("mrs {}, ctr_el0", out(reg) ctr) };
+            // DminLine, bits [19:16]: Log2 of the number of words in the smallest cache line.
+            (ctr >> 16) & 0xf
+        };
+        // A word contains 4 bytes.
+        cache_line_size = 4 << dmin_line;
+        assert!(cache_line_size <= PAGE_SIZE);
+        CACHE_LINE_SIZE.store(cache_line_size, Ordering::Relaxed);
+    }
+
+    // Start at an aligned address, so the following loop can cover every byte in the range.
+    range.start &= !(cache_line_size - 1);
+
+    for vaddr in range.step_by(cache_line_size) {
+        // Performing cache maintenance operations is required for correctness
+        // on systems with non-coherent DMA.
+        // SAFETY: The caller ensures that the virtual address range corresponds
+        // to a DMA region. So the underlying memory is untyped and the operations
+        // are safe to perform.
+        unsafe {
+            if is_from_device {
+                asm!("dc ivac, {}", in(reg) vaddr, options(nostack, preserves_flags));
+            } else {
+                asm!("dc cvac, {}", in(reg) vaddr, options(nostack, preserves_flags));
+            }
+        }
+    }
 }
 
 /// Activates the given root-level page table.

@@ -38,6 +38,9 @@ pub mod segment;
 pub mod unique;
 pub mod untyped;
 
+#[cfg(all(target_arch = "x86_64", feature = "cvm_guest"))]
+pub(crate) mod unaccepted;
+
 mod frame_ref;
 pub use frame_ref::FrameRef;
 
@@ -210,7 +213,7 @@ impl<M: AnyFrameMeta + ?Sized> Frame<M> {
     ///
     /// Also, the caller ensures that the usage of the frame is correct. There's
     /// no checking of the usage in this function.
-    pub(in crate::mm) unsafe fn from_raw(paddr: Paddr) -> Self {
+    pub(crate) unsafe fn from_raw(paddr: Paddr) -> Self {
         debug_assert!(paddr < max_paddr());
 
         let vaddr = mapping::frame_to_meta::<PagingConsts>(paddr);
@@ -263,7 +266,7 @@ impl<M: AnyFrameMeta + ?Sized> Drop for Frame<M> {
             // `Arc::drop`: <https://doc.rust-lang.org/std/sync/struct.Arc.html#method.drop>.
             core::sync::atomic::fence(Ordering::Acquire);
 
-            // SAFETY: this is the last reference and is about to be dropped.
+            // SAFETY: This is the last reference and is about to be dropped.
             unsafe { self.slot().drop_last_in_place() };
 
             // SAFETY: The last reference is gone, so the page is returned to Miri as unused.

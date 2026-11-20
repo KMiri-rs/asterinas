@@ -30,24 +30,11 @@ pub(super) fn sys_semctl(
     );
 
     let ns_proxy = ctx.thread_local.borrow_ns_proxy();
-    let ipc_ns = ns_proxy.unwrap().ipc_ns();
+    let ipc_ns = ns_proxy.ipc_ns();
 
     match cmd {
         IpcControlCmd::IPC_RMID => {
-            let euid = ctx.posix_thread.credentials().euid();
-            ipc_ns.remove_sem_set(semid, |sem_set| {
-                // TODO: Consider capabilities in addition to UIDs.
-                let permission = sem_set.permission();
-                let can_remove = (euid == permission.uid()) || (euid == permission.cuid());
-                if !can_remove {
-                    return_errno_with_message!(
-                        Errno::EPERM,
-                        "the process does not have permission to remove the semaphore set"
-                    );
-                }
-
-                Ok(())
-            })?;
+            ipc_ns.remove_sem_set(semid, ctx.posix_thread)?;
         }
         IpcControlCmd::IPC_STAT => {
             ipc_ns.with_sem_set(semid, PermissionMode::READ, |sem_set| {

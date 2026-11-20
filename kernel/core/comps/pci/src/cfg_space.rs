@@ -11,6 +11,7 @@ use ostd::{
     io::IoMem,
     mm::{PodOnce, VmIoOnce},
 };
+use spin::Once;
 
 use super::PciDeviceLocation;
 
@@ -160,36 +161,38 @@ pub enum PciCardbusBridgeCfgOffset {
 
 bitflags! {
     /// PCI device common config space command register.
+    #[derive(Clone, Copy, Debug)]
     pub struct Command: u16 {
         /// Sets to 1 if the device can respond to I/O Space accesses.
-        const IO_SPACE                  =  1 << 0;
+        const IO_SPACE                 = 1 << 0;
         /// Sets to 1 if the device can respond to Memory SPace accesses.
-        const MEMORY_SPACE              =  1 << 1;
+        const MEMORY_SPACE             = 1 << 1;
         /// Sets to 1 if the device can behave as a bus master.
-        const BUS_MASTER                =  1 << 2;
+        const BUS_MASTER               = 1 << 2;
         /// Sets to 1 if the device can monitor Special Cycle operations.
-        const SPECIAL_CYCLES            =  1 << 3;
+        const SPECIAL_CYCLES           = 1 << 3;
         /// Memory Write and Invalidate Enable. Set to 1 if the device can
         /// generate the Memory Write and Invalidate command.
-        const MWI_ENABLE                =  1 << 4;
+        const MWI_ENABLE               = 1 << 4;
         /// Sets to 1 if the device does not respond to palette register writes
         /// and will snoop the data.
-        const VGA_PALETTE_SNOOP         =  1 << 5;
+        const VGA_PALETTE_SNOOP        = 1 << 5;
         /// Sets to 1 if the device will takes its normal action when a parity
         /// error is detected.
-        const PARITY_ERROR_RESPONSE     =  1 << 6;
+        const PARITY_ERROR_RESPONSE    = 1 << 6;
         /// Sets to 1 if the SERR# driver is enabled.
-        const SERR_ENABLE               =  1 << 8;
+        const SERR_ENABLE              = 1 << 8;
         /// Sets to 1 if the device is allowed to generate fast back-to-back
         /// transactions
-        const FAST_BACK_TO_BACK_ENABLE  =  1 << 9;
+        const FAST_BACK_TO_BACK_ENABLE = 1 << 9;
         /// Sets to 1 if the assertion of the devices INTx# signal is disabled.
-        const INTERRUPT_DISABLE         =  1 << 10;
+        const INTERRUPT_DISABLE        = 1 << 10;
     }
 }
 
 bitflags! {
     /// PCI device common config space status register.
+    #[derive(Clone, Copy, Debug)]
     pub struct Status: u16 {
         /// The status of the device's INTx# signal.
         const INTERRUPT_STATUS          = 1 << 3;
@@ -245,7 +248,7 @@ pub enum Bar {
 
 impl Bar {
     /// Acquires access to the BAR.
-    pub fn acquire(&mut self) -> Result<BarAccess> {
+    pub fn acquire(&self) -> Result<BarAccess> {
         match self {
             Self::Memory(mem_bar) => mem_bar.acquire().cloned().map(BarAccess::Memory),
             // TODO: Implement the `acquire` operation based on `IoPortAllocator`.
@@ -322,7 +325,7 @@ pub struct MemoryBar {
     size: u64,
     prefetchable: bool,
     address_length: AddrLen,
-    io_memory: Option<IoMem>,
+    io_memory: Once<IoMem>,
 }
 
 impl MemoryBar {
@@ -348,16 +351,12 @@ impl MemoryBar {
     }
 
     /// Acquires access to the memory BAR.
-    pub fn acquire(&mut self) -> Result<&IoMem> {
-        if self.io_memory.is_none() {
+    pub fn acquire(&self) -> Result<&IoMem> {
+        self.io_memory.try_call_once(|| {
             // Use the `Uncacheable` cache policy for PCI device BARs by default.
             // Device-specific drivers may remap with different cache policies if needed.
-            self.io_memory = Some(IoMem::acquire(
-                (self.base as usize)..((self.base + self.size) as usize),
-            )?);
-        }
-
-        Ok(self.io_memory.as_ref().unwrap())
+            IoMem::acquire((self.base as usize)..((self.base + self.size) as usize))
+        })
     }
 
     /// Returns access to the memory BAR.
@@ -366,7 +365,7 @@ impl MemoryBar {
     ///
     /// [`acquire`]: Self::acquire
     pub fn access(&self) -> Option<&IoMem> {
-        self.io_memory.as_ref()
+        self.io_memory.get()
     }
 
     /// Creates a memory BAR structure.
@@ -462,7 +461,7 @@ impl MemoryBar {
             size,
             prefetchable,
             address_length,
-            io_memory: None,
+            io_memory: Once::new(),
         })
     }
 }

@@ -12,7 +12,7 @@ use super::{RenameMode, is_dot, is_dot_or_dotdot, is_dotdot};
 use crate::{
     fs::{
         self,
-        file::{InodeMode, InodeType},
+        file::{InodeMode, InodeType, Permission},
         vfs::{
             inode::{Inode, MknodType, RevalidationPolicy},
             inode_ext::InodeExt,
@@ -266,7 +266,7 @@ impl Dentry {
     }
 
     /// Gets the type of the `Dentry`.
-    pub(super) fn type_(&self) -> InodeType {
+    pub(in crate::fs) fn type_(&self) -> InodeType {
         self.type_
     }
 
@@ -280,7 +280,7 @@ impl Dentry {
     /// Gets the parent `Dentry`.
     ///
     /// Returns `None` if it is a root or pseudo `Dentry`.
-    pub(super) fn parent(&self) -> Option<Arc<Self>> {
+    pub(in crate::fs) fn parent(&self) -> Option<Arc<Self>> {
         self.name_and_parent.parent()
     }
 
@@ -305,7 +305,7 @@ impl Dentry {
 
     /// Checks if this dentry is a descendant of or the same as the given
     /// ancestor dentry.
-    pub(super) fn is_equal_or_descendant_of(&self, ancestor: &Arc<Self>) -> bool {
+    pub(in crate::fs) fn is_equal_or_descendant_of(&self, ancestor: &Arc<Self>) -> bool {
         let mut current = Some(self.this());
 
         while let Some(node) = current {
@@ -395,7 +395,7 @@ impl Deref for DirDentry<'_> {
 }
 
 impl DirDentry<'_> {
-    pub(super) fn create_child(
+    pub(in crate::fs) fn create_child(
         &self,
         name: &str,
         create_inode_fn: impl FnOnce() -> Result<Arc<dyn Inode>>,
@@ -411,11 +411,21 @@ impl DirDentry<'_> {
         Ok(self.insert_positive_child(&mut children, name, new_child))
     }
 
+    fn validate_name_len(&self, name: &str) -> Result<()> {
+        let max_namelen = self.inode.fs().max_name_len();
+        if name.len() > max_namelen {
+            return_errno_with_message!(Errno::ENAMETOOLONG, "the path name is too long");
+        }
+        Ok(())
+    }
+
     /// Validates that `name` is absent and keeps that result stable for creation.
     fn validate_child_absent<'a>(
         &'a self,
         name: &str,
     ) -> Result<RwMutexUpgradeableGuard<'a, DentryChildren>> {
+        self.validate_name_len(name)?;
+
         let mut children = self.children.upread();
 
         if let Some(cached_entry) = children.find(name) {
@@ -466,6 +476,8 @@ impl DirDentry<'_> {
         Ok(self.inode.metadata()?.mode.has_sticky_bit())
     }
 
+    /// Checks whether the sticky-bit rule permits the current thread to remove
+    /// or rename the entry for `child_inode` in this directory.
     fn check_sticky_bit_permission(&self, child_inode: &Arc<dyn Inode>) -> Result<()> {
         let current_thread = current_thread!();
         let Some(posix_thread) = current_thread.as_posix_thread() else {
@@ -561,6 +573,7 @@ impl DirDentry<'_> {
     /// [`super::PathResolver::lookup_at_path`].
     pub(in crate::fs) fn lookup_child(&self, name: &str) -> Result<Arc<Dentry>> {
         debug_assert!(!is_dot_or_dotdot(name));
+        self.validate_name_len(name)?;
 
         let mut children = self.children.upread();
 
@@ -601,7 +614,7 @@ impl DirDentry<'_> {
     }
 
     /// Creates a `Dentry` by making an inode of the `type_` with the `mode`.
-    pub(super) fn mknod(
+    pub(in crate::fs) fn mknod(
         &self,
         name: &str,
         mode: InodeMode,
@@ -637,7 +650,7 @@ impl DirDentry<'_> {
     }
 
     /// Links a new `Dentry` by `link()` the old inode.
-    pub(super) fn link(&self, old_dentry: &Dentry, name: &str) -> Result<()> {
+    pub(in crate::fs) fn link(&self, old_dentry: &Dentry, name: &str) -> Result<()> {
         let children = self.validate_child_absent(name)?;
         self.inode.link(self, old_dentry, name)?;
         let dentry = Dentry::new(
@@ -653,7 +666,7 @@ impl DirDentry<'_> {
     }
 
     /// Deletes a `Dentry` by `unlink()` the inner inode.
-    pub(super) fn unlink(&self, name: &str) -> Result<()> {
+    pub(in crate::fs) fn unlink(&self, name: &str) -> Result<()> {
         if is_dot_or_dotdot(name) {
             return_errno_with_message!(Errno::EISDIR, "unlink on . or ..");
         }
@@ -684,7 +697,7 @@ impl DirDentry<'_> {
     }
 
     /// Deletes a directory `Dentry` by `rmdir()` the inner inode.
-    pub(super) fn rmdir(&self, name: &str) -> Result<()> {
+    pub(in crate::fs) fn rmdir(&self, name: &str) -> Result<()> {
         if is_dot(name) {
             return_errno_with_message!(Errno::EINVAL, "rmdir on .");
         }
@@ -721,6 +734,8 @@ impl DirDentry<'_> {
         name: &str,
         remove_child_fn: impl FnOnce(&dyn Inode, &Dentry) -> Result<()>,
     ) -> Result<Arc<Dentry>> {
+        self.validate_name_len(name)?;
+
         let dir_inode = self.inode();
         let mut children = self.children.upread();
         let cached_child = match children.find(name) {
@@ -753,6 +768,10 @@ impl DirDentry<'_> {
             ),
         };
 
+        if self.has_sticky_bit()? {
+            self.check_sticky_bit_permission(child_dentry.inode())?;
+        }
+
         remove_child_fn(dir_inode.as_ref(), &child_dentry)?;
         if cached_child.is_some() {
             children.upgrade().delete(name);
@@ -762,7 +781,7 @@ impl DirDentry<'_> {
 
     /// Renames the `old_name` entry in this directory to the `new_name` entry
     /// in `new_dir`.
-    pub(super) fn rename(
+    pub(in crate::fs) fn rename(
         &self,
         old_name: &str,
         new_dir: &DirDentry,
@@ -780,12 +799,10 @@ impl DirDentry<'_> {
             }
         }
 
-        let old_dir_inode = self.inode();
+        self.validate_name_len(old_name)?;
+        new_dir.validate_name_len(new_name)?;
 
-        let max_namelen = old_dir_inode.fs().sb().namelen;
-        if old_name.len() > max_namelen || new_name.len() > max_namelen {
-            return_errno_with_message!(Errno::ENAMETOOLONG, "old_name or new_name is too long");
-        }
+        let old_dir_inode = self.inode();
 
         if core::ptr::eq(self.inner, new_dir.inner) {
             // The two are the same dentry, we just modify the name
@@ -879,6 +896,17 @@ impl DirDentry<'_> {
                 && let Some(replaced_inode) = replaced_inode
             {
                 new_dir.check_sticky_bit_permission(replaced_inode)?;
+            }
+
+            if old_inode.type_() == InodeType::Dir {
+                old_inode.check_permission(Permission::MAY_WRITE)?;
+            }
+
+            if mode == RenameMode::Exchange
+                && let Some(replaced_inode) = &replaced_inode
+                && replaced_inode.type_() == InodeType::Dir
+            {
+                replaced_inode.check_permission(Permission::MAY_WRITE)?;
             }
 
             old_dir_inode.rename(&old_dentry, new_dir, new_name, replaced_inode, mode)?;
@@ -1026,6 +1054,7 @@ impl DentryKey {
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug)]
     struct DentryFlags: u32 {
         const MOUNTED = 1 << 0;
     }

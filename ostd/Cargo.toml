@@ -26,10 +26,10 @@ log.workspace = true
 minicov = { workspace = true, optional = true }
 num-traits.workspace = true
 ostd-macros.workspace = true
-ostd-test.workspace = true
 ostd-pod.workspace = true
-spin.workspace = true
+ostd-test.workspace = true
 smallvec.workspace = true
+spin.workspace = true
 zerocopy.workspace = true
 
 # The targets are chosen to prevent the generated machine code from using any
@@ -62,6 +62,7 @@ unwinding = { workspace = true, features = ["fde-static"] }
 
 [target.loongarch64-unknown-none-softfloat.dependencies]
 fdt.workspace = true
+int-to-c-enum.workspace = true
 loongArch64.workspace = true
 unwinding = { workspace = true, features = ["fde-gnu-eh-frame-hdr"] }
 

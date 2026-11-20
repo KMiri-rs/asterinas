@@ -17,8 +17,8 @@
 //! Handles trap.
 
 pub(super) mod gdt;
-mod idt;
-mod syscall;
+pub(super) mod idt;
+pub(super) mod syscall;
 
 use super::cpu::context::GeneralRegs;
 use crate::{
@@ -33,7 +33,8 @@ use crate::{
 
 cfg_select! {
     feature = "cvm_guest" => {
-        use tdx_guest::{tdcall, handle_virtual_exception};
+        use tdx_guest::{handle_virtual_exception, tdcall};
+
         use crate::arch::tdx_guest::TrapFrameWrapper;
     }
 }
@@ -132,7 +133,9 @@ pub(crate) unsafe fn init_on_cpu() {
 
     idt::init_on_cpu();
 
-    // SAFETY: `gdt::init_on_cpu` has been called before.
+    // SAFETY:
+    // 1. Since there's no traps, no preemption can occur.
+    // 2. `gdt::init_on_cpu` has been called before.
     unsafe { syscall::init_on_cpu() };
 }
 

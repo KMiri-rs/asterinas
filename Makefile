@@ -30,7 +30,11 @@ CMDLINE ?=
 # Asterinas will automatically fall back to tty0 if hvc0 is not available.
 # Note that currently the virtual terminal (tty0) can only work with
 # linux-efi-handover64 and linux-efi-pe64 boot protocol.
+ifeq ($(SCHEME), sifive_u)
+CONSOLE ?= ttyS0
+else
 CONSOLE ?= hvc0
+endif
 # End of global build options.
 
 # GDB debugging and profiling options.
@@ -64,6 +68,7 @@ CONFORMANCE_TEST_EXTRA_BLOCKLISTS ?= ""
 #              it with `CONFORMANCE_TEST_GVISOR_FILTER`).
 # - kselftest: a `<collection>:<case>` entry, e.g. `timers:posix_timers`.
 # - ltp:       a syscall testcase id, e.g. `rename01`.
+# - pjdfstest: a test case path, e.g. `rename/24.t`.
 # - xfstests:  a test id, e.g. `generic/001`.
 CONFORMANCE_TEST_SELECTOR ?= ""
 # gVisor-only positive gtest filter, applied inside one selected gVisor test
@@ -73,19 +78,29 @@ CONFORMANCE_TEST_GVISOR_FILTER ?= ""
 XFSTESTS_FS_TYPE ?= ext2
 XFSTESTS_RUNLIST ?= short.list
 XFSTESTS_DISK_SIZE ?= 12G
-XFSTESTS_TEST_DEV ?= /dev/vdd
-XFSTESTS_SCRATCH_DEV ?= /dev/vde
+
+# Parameters for pjdfstest. Supported value: 'ext2', 'ramfs'.
+PJDFSTEST_FS_TYPE ?= ext2
+
 # Specify whether to build regression tests under `test/initramfs/src/regression`.
 ENABLE_REGRESSION_TEST ?= false
 # End of auto test features.
 
 # Network settings
-# NETDEV possible values are user,tap
+# NETDEV possible values are user, tap, and none. SCHEME=microvm does not support none.
 NETDEV ?= user
 VHOST ?= off
 # The name server listed by /etc/resolv.conf inside the Asterinas VM
 DNS_SERVER ?= none
 # End of network settings
+
+# Virtio-fs settings. Set VIRTIOFS=on to attach a virtio-fs device. Set
+# VIRTIOFS_SCRATCH=on to attach a second device (requires VIRTIOFS=on).
+# VIRTIOFS_CACHE accepts auto, always, never, or metadata.
+VIRTIOFS ?= off
+VIRTIOFS_SCRATCH ?= off
+VIRTIOFS_CACHE ?= auto
+# End of Virtio-fs settings.
 
 # NixOS settings
 NIXOS_DISK_SIZE_IN_MB ?= 16384
@@ -136,10 +151,14 @@ CARGO_OSDK_BUILD_ARGS += --kcmd-args="CONFORMANCE_TEST_EXTRA_BLOCKLISTS=$(CONFOR
 CARGO_OSDK_BUILD_ARGS += --kcmd-args="CONFORMANCE_TEST_SELECTOR=$(CONFORMANCE_TEST_SELECTOR)"
 CARGO_OSDK_BUILD_ARGS += --kcmd-args="CONFORMANCE_TEST_GVISOR_FILTER=$(CONFORMANCE_TEST_GVISOR_FILTER)"
 ifeq ($(CONFORMANCE_TEST_SUITE), xfstests)
+include test/initramfs/src/conformance/xfstests/build_config.mk
 CARGO_OSDK_BUILD_ARGS += --kcmd-args="XFSTESTS_FS_TYPE=$(XFSTESTS_FS_TYPE)"
 CARGO_OSDK_BUILD_ARGS += --kcmd-args="XFSTESTS_RUNLIST=$(XFSTESTS_RUNLIST)"
 CARGO_OSDK_BUILD_ARGS += --kcmd-args="XFSTESTS_TEST_DEV=$(XFSTESTS_TEST_DEV)"
 CARGO_OSDK_BUILD_ARGS += --kcmd-args="XFSTESTS_SCRATCH_DEV=$(XFSTESTS_SCRATCH_DEV)"
+endif
+ifeq ($(CONFORMANCE_TEST_SUITE), pjdfstest)
+CARGO_OSDK_BUILD_ARGS += --kcmd-args="PJDFSTEST_FS_TYPE=$(PJDFSTEST_FS_TYPE)"
 endif
 CARGO_OSDK_BUILD_ARGS += --init-args="/opt/run_conformance_test.sh"
 else ifeq ($(AUTO_TEST), regression)
@@ -153,8 +172,6 @@ ENABLE_REGRESSION_TEST := true
 export VSOCK=on
 CARGO_OSDK_BUILD_ARGS += --init-args="/test/run_vsock_test.sh"
 endif
-
-include test/initramfs/src/conformance/xfstests/build_config.mk
 
 ifeq ($(RELEASE_LTO), 1)
 CARGO_OSDK_COMMON_ARGS += --profile release-lto
@@ -222,8 +239,9 @@ endif
 
 # To test the linux-efi-handover64 boot protocol, we need to use Debian's
 # GRUB release, which is installed in /usr/bin in our Docker image.
+GRUB_MKRESCUE ?= /usr/bin/grub-mkrescue
 ifeq ($(BOOT_PROTOCOL), linux-efi-handover64)
-CARGO_OSDK_COMMON_ARGS += --grub-mkrescue=/usr/bin/grub-mkrescue --grub-boot-protocol="linux"
+CARGO_OSDK_COMMON_ARGS += --grub-mkrescue="$(GRUB_MKRESCUE)" --grub-boot-protocol="linux"
 else ifeq ($(BOOT_PROTOCOL), linux-efi-pe64)
 CARGO_OSDK_COMMON_ARGS += --grub-boot-protocol="linux"
 else ifeq ($(BOOT_PROTOCOL), linux-legacy32)
@@ -235,7 +253,7 @@ CARGO_OSDK_COMMON_ARGS += --grub-boot-protocol=$(BOOT_PROTOCOL)
 endif
 
 ifeq ($(ENABLE_KVM), 1)
-	ifeq ($(TARGET_ARCH), x86_64)
+	ifeq ($(shell [ -e /dev/kvm ] && [ "$$(uname -m)" = "$(TARGET_ARCH)" ] && echo yes),yes)
 	CARGO_OSDK_COMMON_ARGS += --qemu-args="-accel kvm"
 	endif
 endif
@@ -249,6 +267,15 @@ endif
 
 ifeq ($(INITRAMFS),on)
 CARGO_OSDK_COMMON_ARGS += $(CARGO_OSDK_INITRAMFS_OPTION)
+endif
+CARGO_OSDK_VIRTIOFSD := ./tools/run_virtiofsd.sh --cache-mode $(VIRTIOFS_CACHE) --work-dir
+ifeq ($(VIRTIOFS),on)
+# Each Make invocation gets an isolated virtio-fs work directory under /tmp.
+VIRTIOFS_WORK_DIR := $(shell mktemp -d -p /tmp asterinas-virtiofs-XXXXXX)
+CARGO_OSDK_COMMON_ARGS += --qemu-with-daemon="$(CARGO_OSDK_VIRTIOFSD) $(VIRTIOFS_WORK_DIR)"
+endif
+ifeq ($(VIRTIOFS_SCRATCH),on)
+CARGO_OSDK_COMMON_ARGS += --qemu-with-daemon="$(CARGO_OSDK_VIRTIOFSD) $(VIRTIOFS_WORK_DIR)/scratch"
 endif
 
 CARGO_OSDK_BUILD_ARGS += $(CARGO_OSDK_COMMON_ARGS)
@@ -343,41 +370,46 @@ else ifeq ($(AUTO_TEST), vsock)
 endif
 
 # Build the Asterinas NixOS ISO installer image
+.PHONY: iso
 iso: BOOT_PROTOCOL = linux-efi-handover64
 iso:
 	@make kernel
 	@if [ -n "$(NIXOS_TEST_SUITE)" ]; then \
-        $(MAKE) --no-print-directory -C test/nixos iso; \
-    else \
-        ./tools/nixos/build_iso.sh; \
-    fi
+		$(MAKE) --no-print-directory -C test/nixos iso; \
+	else \
+		./tools/nixos/build_iso.sh; \
+	fi
 
 # Build the Asterinas NixOS ISO installer image and then do installation
+.PHONY: run_iso
 run_iso: OVMF = off
 run_iso:
 	@./tools/nixos/run.sh iso
 
 # Create an Asterinas NixOS installation on host
+.PHONY: nixos
 nixos: BOOT_PROTOCOL = linux-efi-handover64
 nixos:
 	@make kernel
 	@if [ -n "$(NIXOS_TEST_SUITE)" ]; then \
-        $(MAKE) --no-print-directory -C test/nixos nixos; \
-    else \
-        ./tools/nixos/build_nixos.sh; \
-    fi
+		$(MAKE) --no-print-directory -C test/nixos nixos; \
+	else \
+		./tools/nixos/build_nixos.sh; \
+	fi
 
 # After creating a Asterinas NixOS installation (via either the `run_iso` or `nixos` target),
 # run the NixOS
+.PHONY: run_nixos
 run_nixos: OVMF = off
 run_nixos:
 	@if [ -n "$(NIXOS_TEST_SUITE)" ]; then \
-        $(MAKE) --no-print-directory -C test/nixos run_nixos; \
-    else \
-        ./tools/nixos/run.sh nixos; \
-    fi
+		$(MAKE) --no-print-directory -C test/nixos run_nixos; \
+	else \
+		./tools/nixos/run.sh nixos; \
+	fi
 
 # Build the Asterinas NixOS patched packages
+.PHONY: cachix
 cachix:
 	@nix-build distro/cachix \
 		--option extra-substituters "${RELEASE_SUBSTITUTER} ${DEV_SUBSTITUTER}" \
@@ -413,9 +445,9 @@ profile_client: initramfs $(CARGO_OSDK)
 
 .PHONY: test
 test: NON_DEFAULT_PACKAGE_NAMES = \
-    $(shell ./tools/print_workspace_members.sh --non-default-ones --package-names)
+	$(shell ./tools/print_workspace_members.sh --non-default-ones --package-names)
 test: TEST_PACKAGE_NAMES = \
-    $(filter-out linux-bzimage-setup,$(NON_DEFAULT_PACKAGE_NAMES))
+	$(filter-out linux-bzimage-setup,$(NON_DEFAULT_PACKAGE_NAMES))
 test:
 	@if [ -n "$(TEST_PACKAGE_NAMES)" ]; then \
 		cargo test $(addprefix -p ,$(TEST_PACKAGE_NAMES)); \
@@ -435,13 +467,13 @@ ktest: initramfs $(CARGO_OSDK)
 
 .PHONY: docs
 docs: private DEFAULT_PACKAGE_NAMES = \
-    $(shell ./tools/print_workspace_members.sh --default-ones --package-names)
+	$(shell ./tools/print_workspace_members.sh --default-ones --package-names)
 docs: private DEFAULT_NON_CORE_PACKAGE_NAMES = \
-    $(filter-out aster-core,$(DEFAULT_PACKAGE_NAMES))
+	$(filter-out aster-core,$(DEFAULT_PACKAGE_NAMES))
 docs: private NON_DEFAULT_PACKAGE_NAMES = \
-    $(shell ./tools/print_workspace_members.sh --non-default-ones --package-names)
+	$(shell ./tools/print_workspace_members.sh --non-default-ones --package-names)
 docs: private DOC_NON_DEFAULT_PACKAGE_NAMES = \
-    $(filter-out linux-bzimage-setup,$(NON_DEFAULT_PACKAGE_NAMES))
+	$(filter-out linux-bzimage-setup,$(NON_DEFAULT_PACKAGE_NAMES))
 docs: $(CARGO_OSDK)
 	@if [ -n "$(DEFAULT_NON_CORE_PACKAGE_NAMES)" ]; then \
 		RUSTDOCFLAGS="-Dwarnings" cargo osdk doc $(addprefix -p ,$(DEFAULT_NON_CORE_PACKAGE_NAMES)) --no-deps; \
@@ -468,7 +500,7 @@ format:
 	@
 	@# Format the code using various tools
 	@./tools/format_all.sh
-	@nixfmt ./distro
+	@./tools/nixfmt.sh flake.nix distro tools/dev_env/nix
 	@$(MAKE) --no-print-directory -C test/initramfs format
 	@$(MAKE) --no-print-directory -C test/nixos format
 
@@ -478,7 +510,7 @@ check-ostd:
 
 .PHONY: check
 check: private WORKSPACE_MEMBER_DIRS = \
-    $(shell ./tools/print_workspace_members.sh)
+	$(shell ./tools/print_workspace_members.sh)
 check: $(CARGO_OSDK)
 	@# Check if any git-tracked, non-patch files contain trailing whitespace
 	@# NOTE: `--git-dir` will suppress "detected dubious ownership in repository" errors
@@ -501,8 +533,8 @@ check: $(CARGO_OSDK)
 	@# Check compilation of the Rust code
 	@./tools/clippy_check.sh workspace
 	@
-	@# Check formatting issues of Nix files under distro directory
-	@nixfmt --check ./distro
+	@# Check Nix formatting
+	@./tools/nixfmt.sh --check flake.nix distro tools/dev_env/nix
 	@
 	@# Check formatting issues of the C code and Nix files (regression tests)
 	@$(MAKE) --no-print-directory -C test/initramfs check

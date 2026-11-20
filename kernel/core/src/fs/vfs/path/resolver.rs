@@ -4,18 +4,21 @@ use alloc::str;
 
 use ostd::task::Task;
 
-use super::{Mount, Path, mount::MountTopology};
+use super::{Mount, MountTopology, Path, PerMountFlags};
 use crate::{
     fs::{
         file::{
             InodeType, Permission,
             file_table::{FileDesc, RawFileDesc, get_file_fast},
         },
-        utils::{NAME_MAX, PATH_MAX, SYMLINKS_MAX},
+        utils::{PATH_MAX, SYMLINKS_MAX},
         vfs::{inode::SymbolicLink, path::MountNamespace},
     },
     prelude::*,
-    process::{pid_table::PidTable, posix_thread::AsPosixThread},
+    process::{
+        credentials::capabilities::CapSet, pid_table::PidTable, posix_thread::AsPosixThread,
+    },
+    security::lsm::hooks as lsm_hooks,
 };
 
 /// The file descriptor of the current working directory.
@@ -160,13 +163,35 @@ impl PathResolver {
         &self.cwd
     }
 
+    /// Changes the current working directory to `path`.
+    pub(crate) fn chdir(&mut self, path: Path) -> Result<()> {
+        path.check_dir_search_permission()?;
+
+        self.set_cwd(path);
+        Ok(())
+    }
+
+    /// Changes the root directory to `path`.
+    pub(crate) fn chroot(&mut self, path: Path, ctx: &Context) -> Result<()> {
+        path.check_dir_search_permission()?;
+
+        lsm_hooks::on_capable(lsm_hooks::CapableContext::new(
+            ctx.thread_local.borrow_user_ns().as_ref(),
+            ctx.posix_thread,
+            CapSet::SYS_CHROOT,
+        ))?;
+
+        self.set_root(path);
+        Ok(())
+    }
+
     /// Sets the current working directory to the given `path`.
-    pub(crate) fn set_cwd(&mut self, path: Path) {
+    fn set_cwd(&mut self, path: Path) {
         self.cwd = path;
     }
 
     /// Sets the root directory to the given `path`.
-    pub(crate) fn set_root(&mut self, path: Path) {
+    fn set_root(&mut self, path: Path) {
         self.root = path;
     }
 
@@ -382,7 +407,7 @@ impl PathResolver {
         };
 
         self.root.mount.detach_from_parent(&mut topology_guard);
-        new_root_mount.graft_mount_tree(&parent_path, &mut topology_guard);
+        new_root_mount.graft_mount_tree(parent_path, &mut topology_guard);
         drop(topology_guard);
 
         let new_root = Path::new_root(new_root_mount);
@@ -413,14 +438,8 @@ impl PathResolver {
             );
         }
 
-        // TODO: Check the following once we support `MS_SHARED`:
-        // "The propagation type of the parent mount of `new_root` and the
-        // parent mount of the current root directory must not be
-        // `MS_SHARED`; similarly, if `put_old` is an existing mount point,
-        // its propagation type must not be `MS_SHARED`."
-
         let current_ns_proxy = ctx.thread_local.borrow_ns_proxy();
-        let current_mnt_ns = current_ns_proxy.unwrap().mnt_ns();
+        let current_mnt_ns = current_ns_proxy.mnt_ns();
         if !current_mnt_ns.owns(&new_root_path.mount) || !current_mnt_ns.owns(&put_old_path.mount) {
             return_errno_with_message!(
                 Errno::EINVAL,
@@ -442,13 +461,31 @@ impl PathResolver {
                 "`new_root` or the current root is not a mount point"
             );
         }
-        if new_root_path.mount.parent().is_none() || self.root.mount.parent().is_none() {
+
+        let mut topology_guard = MountTopology::write_lock();
+
+        let Some(new_root_parent) = new_root_path
+            .mount
+            .parent()
+            .and_then(|parent| parent.upgrade())
+        else {
+            return_errno_with_message!(Errno::EINVAL, "`new_root` is on the rootfs mount");
+        };
+        let Some(current_root_parent) =
+            self.root.mount.parent().and_then(|parent| parent.upgrade())
+        else {
+            return_errno_with_message!(Errno::EINVAL, "the current root is on the rootfs mount");
+        };
+
+        if new_root_parent.is_shared()
+            || current_root_parent.is_shared()
+            || put_old_path.mount.is_shared()
+        {
             return_errno_with_message!(
                 Errno::EINVAL,
-                "`new_root` or the current root is on the rootfs mount"
+                "`new_root` parent, current root parent, or `put_old` mount is shared"
             );
         }
-        let mut topology_guard = MountTopology::write_lock();
 
         if !put_old_path.is_reachable_from(&new_root_path, &topology_guard) {
             return_errno_with_message!(
@@ -464,17 +501,16 @@ impl PathResolver {
         }
 
         let parent_path = {
-            let parent_mount = self.root.mount.parent().unwrap().upgrade().unwrap();
             let mountpoint = self.root.mount.mountpoint().unwrap();
-            Path::new(parent_mount, mountpoint)
+            Path::new(current_root_parent, mountpoint)
         };
 
         self.root
             .mount
-            .graft_mount_tree(&put_old_path, &mut topology_guard);
+            .graft_mount_tree(put_old_path, &mut topology_guard);
         new_root_path
             .mount
-            .graft_mount_tree(&parent_path, &mut topology_guard);
+            .graft_mount_tree(parent_path, &mut topology_guard);
 
         // Release the mount topology lock before taking other threads' resolver locks.
         drop(topology_guard);
@@ -493,7 +529,11 @@ impl PathResolver {
                 continue;
             }
             let fs = posix_thread.read_fs();
-            if Arc::ptr_eq(&fs, &ctx.thread_local.borrow_fs()) {
+            let Some(fs) = fs.as_ref() else {
+                // The thread has exited.
+                continue;
+            };
+            if Arc::ptr_eq(fs, &ctx.thread_local.borrow_fs()) {
                 continue;
             }
 
@@ -560,8 +600,11 @@ impl PathResolver {
                 visible.push(mount.clone());
             }
 
-            let children = mount.children.read();
-            for child_mount in children.values() {
+            // Checking the mountpoint ancestry may drop the last reference to an ancestor
+            // dentry that has been renamed away and removed, and the reclaim operation may
+            // sleep, so do not check it under the `children` lock.
+            let children: Vec<Arc<Mount>> = mount.children.read().values().cloned().collect();
+            for child_mount in children {
                 if is_root_mount && !is_root_mount_root {
                     let Some(mountpoint) = child_mount.mountpoint() else {
                         continue;
@@ -570,7 +613,7 @@ impl PathResolver {
                         continue;
                     }
                 }
-                stack.push(child_mount.clone());
+                stack.push(child_mount);
             }
         }
 
@@ -587,10 +630,6 @@ impl PathResolver {
         if path.inode().check_permission(Permission::MAY_EXEC).is_err() {
             return_errno_with_message!(Errno::EACCES, "the path cannot be looked up");
         }
-        if name.len() > NAME_MAX {
-            return_errno_with_message!(Errno::ENAMETOOLONG, "the path name is too long");
-        }
-
         let target_path = if super::is_dot(name) {
             return Ok(path.this());
         } else if super::is_dotdot(name) {
@@ -737,6 +776,16 @@ impl PathResolver {
                     // resolved even when `follow_tail_link` is false.
                     || target_is_dir)
             {
+                if next_path
+                    .mount_node()
+                    .flags()
+                    .contains(PerMountFlags::NOSYMFOLLOW)
+                {
+                    return_errno_with_message!(
+                        Errno::ELOOP,
+                        "the symlink is on a file system mounted with `nosymfollow`"
+                    );
+                }
                 if follows >= SYMLINKS_MAX {
                     return_errno_with_message!(Errno::ELOOP, "there are too many symlinks");
                 }

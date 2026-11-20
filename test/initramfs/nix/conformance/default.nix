@@ -2,6 +2,7 @@
   lib,
   stdenvNoCC,
   callPackage,
+  hostPlatform,
   testSuite ? "ltp",
   workDir ? "/tmp",
   testSelector ? "",
@@ -9,18 +10,15 @@
 }:
 rec {
   inherit testSuite;
-  ltp = callPackage ./ltp.nix { };
-  # FIXME: Build gvisor syscall test with nix.
-  gvisor = builtins.path {
-    name = "gvisor-prebuilt";
-    path = builtins.getEnv "GVISOR_PREBUILT_DIR";
-  };
+  gvisor = callPackage ./gvisor { };
   kselftest = callPackage ./kselftest.nix { };
+  ltp = callPackage ./ltp.nix { };
 
   conformanceSrc = lib.fileset.toSource {
     root = ./../../src/conformance;
     fileset = ./../../src/conformance;
   };
+  pjdfstest = callPackage ./pjdfstest.nix { inherit conformanceSrc; };
   xfstests = callPackage ./xfstests.nix { inherit conformanceSrc; };
 
   package = stdenvNoCC.mkDerivation {
@@ -35,9 +33,11 @@ rec {
       export CONFORMANCE_TEST_WORKDIR=${workDir}
       export CONFORMANCE_TEST_SELECTOR=${testSelector}
       export SMP=${toString smp}
+      export HOST_PLATFORM=${hostPlatform.system}
       ${lib.optionalString (testSuite == "ltp") "export LTP_PREBUILT_DIR=${ltp}"}
       ${lib.optionalString (testSuite == "gvisor") "export GVISOR_PREBUILT_DIR=${gvisor}"}
       ${lib.optionalString (testSuite == "kselftest") "export KSELFTEST_PREBUILT_DIR=${kselftest}"}
+      ${lib.optionalString (testSuite == "pjdfstest") "export PJDFSTEST_PREBUILT_DIR=${pjdfstest}"}
       ${lib.optionalString (testSuite == "xfstests") "export XFSTESTS_PREBUILT_DIR=${xfstests}"}
       make
     '';

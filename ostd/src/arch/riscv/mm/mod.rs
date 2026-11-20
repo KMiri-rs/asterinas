@@ -14,7 +14,6 @@ use crate::{
     },
     mm::{
         PAGE_SIZE, Paddr, PagingConstsTrait, PagingLevel, PodOnce, Vaddr,
-        dma::DmaDirection,
         page_prop::{
             CachePolicy, PageFlags, PageProperty, PageTableFlags, PrivilegedPageFlags as PrivFlags,
         },
@@ -49,38 +48,37 @@ impl PagingConstsTrait for PagingConsts {
 
 bitflags::bitflags! {
     /// Possible flags for a page table entry.
-    #[repr(C)]
-    #[derive(Pod)]
+    #[derive(Clone, Copy, Debug)]
     pub(crate) struct PteFlags: usize {
         /// Specifies whether the mapped frame or page table is valid.
-        const VALID =           1 << 0;
+        const VALID      = 1 << 0;
         /// Controls whether reads to the mapped frames are allowed.
-        const READABLE =        1 << 1;
+        const READABLE   = 1 << 1;
         /// Controls whether writes to the mapped frames are allowed.
-        const WRITABLE =        1 << 2;
+        const WRITABLE   = 1 << 2;
         /// Controls whether execution code in the mapped frames are allowed.
-        const EXECUTABLE =      1 << 3;
+        const EXECUTABLE = 1 << 3;
         /// Controls whether accesses from userspace (i.e. U-mode) are permitted.
-        const USER =            1 << 4;
+        const USER       = 1 << 4;
         /// Indicates that the mapping is present in all address spaces, so it isn't flushed from
         /// the TLB on an address space switch.
-        const GLOBAL =          1 << 5;
+        const GLOBAL     = 1 << 5;
         /// Whether the memory area represented by this entry is accessed.
-        const ACCESSED =        1 << 6;
+        const ACCESSED   = 1 << 6;
         /// Whether the memory area represented by this entry is modified.
-        const DIRTY =           1 << 7;
+        const DIRTY      = 1 << 7;
 
         /// First bit ignored by MMU.
-        const RSV1 =            1 << 8;
+        const RSV1       = 1 << 8;
         /// Second bit ignored by MMU.
-        const RSV2 =            1 << 9;
+        const RSV2       = 1 << 9;
 
         /// PBMT: Non-cacheable, idempotent, weakly-ordered (RVWMO), main memory.
-        const PBMT_NC =         1 << 61;
+        const PBMT_NC    = 1 << 61;
         /// PBMT: Non-cacheable, non-idempotent, strongly-ordered (I/O ordering), I/O.
-        const PBMT_IO =         1 << 62;
+        const PBMT_IO    = 1 << 62;
         /// Naturally aligned power-of-2.
-        const NAPOT =           1 << 63;
+        const NAPOT      = 1 << 63;
     }
 }
 
@@ -121,7 +119,9 @@ pub(crate) fn can_sync_dma() -> bool {
 ///  - the virtual address range and DMA direction correspond correctly to a
 ///    DMA region;
 ///  - `can_sync_dma()` is `true`.
-pub(crate) unsafe fn sync_dma_range<D: DmaDirection>(mut range: Range<Vaddr>) {
+pub(crate) unsafe fn sync_dma_range(mut range: Range<Vaddr>, is_from_device: bool) {
+    use core::arch::asm;
+
     debug_assert!(can_sync_dma());
 
     static CMO_MANAGEMENT_BLOCK_SIZE: Once<usize> = Once::new();
@@ -151,11 +151,10 @@ pub(crate) unsafe fn sync_dma_range<D: DmaDirection>(mut range: Range<Vaddr>) {
         // to a DMA region. So the underlying memory is untyped and the operations
         // are safe to perform.
         unsafe {
-            match (D::CAN_READ_FROM_DEVICE, D::CAN_WRITE_TO_DEVICE) {
-                (false, true) => core::arch::asm!("cbo.clean ({})", in(reg) addr, options(nostack)),
-                (true, false) => core::arch::asm!("cbo.inval ({})", in(reg) addr, options(nostack)),
-                (true, true) => core::arch::asm!("cbo.flush ({})", in(reg) addr, options(nostack)),
-                _ => unreachable!(),
+            if is_from_device {
+                asm!("cbo.inval ({})", in(reg) addr, options(nostack, preserves_flags));
+            } else {
+                asm!("cbo.clean ({})", in(reg) addr, options(nostack, preserves_flags));
             }
         }
     }

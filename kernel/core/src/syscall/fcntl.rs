@@ -46,12 +46,22 @@ pub(super) fn sys_fcntl(
 }
 
 fn handle_dupfd(fd: FileDesc, arg: u64, flags: FdFlags, ctx: &Context) -> Result<SyscallReturn> {
-    let ceil_fd = (arg as RawFileDesc)
+    let file_table = ctx.thread_local.borrow_file_table();
+    let mut file_table = file_table.write();
+    let file = file_table.get_file(fd)?.clone();
+
+    let ceil_fd: FileDesc = (arg as RawFileDesc)
         .try_into()
         .map_err(|_| Error::with_message(Errno::EINVAL, "invalid fd"))?;
 
-    let file_table = ctx.thread_local.borrow_file_table();
-    let new_fd = file_table.unwrap().write().dup_ceil(fd, ceil_fd, flags)?;
+    let new_fd = match file_table.insert_ceil(file, Some(ceil_fd), flags) {
+        Ok(fd) => fd,
+        Err((err, file)) => {
+            drop(file_table);
+            drop(file);
+            return Err(err);
+        }
+    };
     Ok(SyscallReturn::Return(new_fd.into()))
 }
 
@@ -101,7 +111,7 @@ fn handle_setfl(fd: FileDesc, arg: u64, ctx: &Context) -> Result<SyscallReturn> 
 
 fn handle_getlk(fd: FileDesc, arg: u64, ctx: &Context) -> Result<SyscallReturn> {
     let mut file_table = ctx.thread_local.borrow_file_table_mut();
-    let owner = FileTable::range_lock_owner(file_table.unwrap());
+    let owner = FileTable::range_lock_owner(&file_table);
     let file = get_file_fast!(&mut file_table, fd);
 
     let lock_mut_ptr = arg as Vaddr;
@@ -132,7 +142,7 @@ fn handle_setlk(
     ctx: &Context,
 ) -> Result<SyscallReturn> {
     let mut file_table = ctx.thread_local.borrow_file_table_mut();
-    let owner = FileTable::range_lock_owner(file_table.unwrap());
+    let owner = FileTable::range_lock_owner(&file_table);
     let file = get_file_fast!(&mut file_table, fd).into_owned();
 
     let lock_mut_ptr = arg as Vaddr;

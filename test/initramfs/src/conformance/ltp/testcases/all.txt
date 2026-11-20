@@ -67,14 +67,14 @@ capset04
 # cachestat03
 # cachestat04
 
-# chdir01
+chdir01
 chdir02
 chdir04
 
 chmod01
 chmod03
-# chmod05
-# chmod06
+chmod05
+chmod06
 chmod07
 chmod08
 # chmod09
@@ -93,7 +93,7 @@ chown05
 # chroot01
 chroot02
 # chroot03
-# chroot04
+chroot04
 
 # clock_adjtime01
 # clock_adjtime02
@@ -268,14 +268,14 @@ posix_fadvise03_64
 
 fchdir01
 fchdir02
-# fchdir03
+fchdir03
 
 fchmod01
 fchmod02
 fchmod03
 fchmod04
-# fchmod05
-# fchmod06
+fchmod05
+fchmod06
 
 #fchmodat test cases
 fchmodat01

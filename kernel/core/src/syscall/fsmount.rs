@@ -5,7 +5,7 @@ use crate::{
     fs::{
         file::{
             DetachedMountFile, FileLike, FsConfigFile,
-            file_table::{FdFlags, RawFileDesc, get_file_fast},
+            file_table::{FdFlags, FileTableInsert, RawFileDesc, get_file_fast},
         },
         vfs::path::PerMountFlags,
     },
@@ -21,7 +21,7 @@ pub(super) fn sys_fsmount(
     let flags = FsMountFlags::try_from(flags)?;
     let mount_attrs = MountAttrs::try_from(mount_attrs)?;
     let per_mount_flags = PerMountFlags::try_from(mount_attrs)?;
-    super::fsopen::check_mount_api_capability(ctx)?;
+    super::mount::check_mount_api_capability(ctx)?;
 
     let fs_config_file = {
         let mut file_table = ctx.thread_local.borrow_file_table_mut();
@@ -35,32 +35,30 @@ pub(super) fn sys_fsmount(
         .ok_or_else(|| Error::with_message(Errno::EINVAL, "the file is not a fs context"))?;
 
     let current_ns_proxy = ctx.thread_local.borrow_ns_proxy();
-    let current_mnt_ns = current_ns_proxy.unwrap().mnt_ns();
+    let current_mnt_ns = current_ns_proxy.mnt_ns();
     let detached_mount =
         fs_config.create_detached_mount(per_mount_flags, Arc::downgrade(current_mnt_ns))?;
     let file = Arc::new(DetachedMountFile::new(detached_mount)) as Arc<dyn FileLike>;
-    let fd = ctx
-        .thread_local
-        .borrow_file_table()
-        .unwrap()
-        .write()
-        .insert(file, FdFlags::from(flags));
+    let file_table = ctx.thread_local.borrow_file_table();
+    let fd = file_table.lock_and_insert(file, FdFlags::from(flags))?;
     Ok(SyscallReturn::Return(fd.into()))
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug)]
     struct FsMountFlags: u32 {
         const FSMOUNT_CLOEXEC = 1;
     }
 
+    #[derive(Clone, Copy, Debug)]
     struct MountAttrs: u32 {
-        const RDONLY = 0x0000_0001;
-        const NOSUID = 0x0000_0002;
-        const NODEV = 0x0000_0004;
-        const NOEXEC = 0x0000_0008;
-        const NOATIME = 0x0000_0010;
+        const RDONLY      = 0x0000_0001;
+        const NOSUID      = 0x0000_0002;
+        const NODEV       = 0x0000_0004;
+        const NOEXEC      = 0x0000_0008;
+        const NOATIME     = 0x0000_0010;
         const STRICTATIME = 0x0000_0020;
-        const NODIRATIME = 0x0000_0080;
+        const NODIRATIME  = 0x0000_0080;
         const NOSYMFOLLOW = 0x0020_0000;
     }
 }

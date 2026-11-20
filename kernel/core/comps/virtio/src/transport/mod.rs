@@ -22,8 +22,8 @@ use crate::{
     queue::{AvailRing, Descriptor, UsedRing},
 };
 
-pub mod mmio;
-pub mod pci;
+pub(crate) mod mmio;
+pub(crate) mod pci;
 
 /// The transport of virtio device. Virtio device can use this transport to:
 /// 1. Set device status.
@@ -31,7 +31,7 @@ pub mod pci;
 /// 3. Access device config memory.
 /// 4. Config virtqueue.
 /// 5. Get the interrupt resources allocated to the device.
-pub trait VirtioTransport: Sync + Send + Debug {
+pub(crate) trait VirtioTransport: Sync + Send + Debug {
     // ====================Device related APIs=======================
 
     /// Get device type.
@@ -103,7 +103,7 @@ pub trait VirtioTransport: Sync + Send + Debug {
 
 /// Manage PCI device/notify configuration space (legacy/modern).
 #[derive(Debug)]
-pub struct ConfigManager<T: Pod> {
+pub(crate) struct ConfigManager<T: Pod> {
     modern_space: Option<SafePtr<T, IoMem>>,
     legacy_space: Option<(BarAccess, usize)>,
 }
@@ -218,26 +218,27 @@ pub enum VirtioTransportError {
 
 bitflags::bitflags! {
     /// The device status field.
-    pub struct DeviceStatus: u8 {
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub(crate) struct DeviceStatus: u8 {
         /// Indicates that the guest OS has found the device and recognized it
         /// as a valid virtio device.
-        const ACKNOWLEDGE = 1;
+        const ACKNOWLEDGE        = 1;
 
         /// Indicates that the guest OS knows how to drive the device.
-        const DRIVER = 2;
+        const DRIVER             = 2;
 
         /// Indicates that something went wrong in the guest, and it has given
         /// up on the device. This could be an internal error, or the driver
         /// didn’t like the device for some reason, or even a fatal error
         /// during device operation.
-        const FAILED = 128;
+        const FAILED             = 128;
 
         /// Indicates that the driver has acknowledged all the features it
         /// understands, and feature negotiation is complete.
-        const FEATURES_OK = 8;
+        const FEATURES_OK        = 8;
 
         /// Indicates that the driver is set up and ready to drive the device.
-        const DRIVER_OK = 4;
+        const DRIVER_OK          = 4;
 
         /// Indicates that the device has experienced an error from which it
         /// can’t recover.
@@ -256,7 +257,7 @@ bitflags::bitflags! {
 /// is dropped without [`finish_init`] being called), [`Drop`] sets `FAILED`. Once
 /// `finish_init` is called, the FAILED bit is no longer set on drop.
 #[derive(Debug)]
-pub struct DeviceTransport {
+pub(crate) struct DeviceTransport {
     inner: Box<dyn VirtioTransport>,
     is_completed: bool,
 }
@@ -266,7 +267,7 @@ impl DeviceTransport {
     ///
     /// The wrapper will set the device status to [`DeviceStatus::FAILED`] on drop
     /// unless [`Self::finish_init`] is called first.
-    pub fn new(transport: Box<dyn VirtioTransport>) -> Self {
+    pub(super) fn new(transport: Box<dyn VirtioTransport>) -> Self {
         Self {
             inner: transport,
             is_completed: false,
@@ -276,7 +277,7 @@ impl DeviceTransport {
     /// Marks initialization as complete and sets the device status to `DRIVER_OK`.
     ///
     /// After this call, the wrapper will NOT set `FAILED` on drop.
-    pub fn finish_init(&mut self) {
+    pub(crate) fn finish_init(&mut self) {
         self.is_completed = true;
         let status = self.inner.read_device_status() | DeviceStatus::DRIVER_OK;
         self.inner.write_device_status(status).unwrap();
@@ -308,7 +309,7 @@ impl Drop for DeviceTransport {
     }
 }
 
-pub fn init() {
+pub(super) fn init() {
     virtio_pci_init();
     virtio_mmio_init();
 }

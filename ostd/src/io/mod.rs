@@ -10,10 +10,7 @@
 pub(crate) mod io_mem;
 
 pub use self::io_mem::IoMem;
-#[cfg_attr(
-    any(target_arch = "loongarch64", target_arch = "aarch64"),
-    expect(unused_imports)
-)]
+#[cfg_attr(target_arch = "loongarch64", expect(unused_imports))]
 pub(crate) use self::io_mem::{IoMemAllocatorBuilder, Sensitive};
 
 cfg_select! {
@@ -21,9 +18,9 @@ cfg_select! {
         mod io_port;
 
         pub use self::io_port::IoPort;
-        pub(crate) use self::io_port::{reserve_io_port_range, sensitive_io_port, RawIoPortRange};
+        pub(crate) use self::io_port::{RawIoPortRange, reserve_io_port_range, sensitive_io_port};
     }
-    _ => {},
+    _ => {}
 }
 
 /// Initializes the static allocator based on builder.

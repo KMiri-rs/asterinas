@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use alloc::sync::{Arc, Weak};
+use alloc::{
+    boxed::Box,
+    sync::{Arc, Weak},
+    vec::Vec,
+};
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use aster_core::{
     current,
     events::IoEvents,
     fs::{
-        file::{PerOpenFileOps, StatusFlags},
+        file::{Mappable, MappableObject, MappedObject, PerOpenFileOps, StatusFlags},
         vfs::{inode::FileOps, path::Path},
     },
     prelude::*,
@@ -16,16 +20,21 @@ use aster_core::{
         signal::{PollHandle, Pollable},
     },
     util::ioctl::RawIoctl,
+    vm::vmar::{FileMmapRequest, MapHandle},
 };
 use atomic_integer_wrapper::define_atomic_version_of_integer_like_type;
+use hashbrown::HashMap;
 use ostd::{
-    mm::{VmReader, VmWriter},
+    mm::{PAGE_SIZE, VmReader, VmWriter},
     sync::Mutex,
 };
+use sparse_id_alloc::SparseIdAlloc;
 
 use crate::{
-    device::{DrmDevice, DrmFeatures, DrmMaster},
+    device::{DrmDevice, DrmMaster},
+    gem::object::DrmGemObject,
     has_current_sys_admin,
+    kms::objects::{KmsObjectId, framebuffer::DrmFramebuffer},
     minor::{DrmMinor, DrmMinorType},
 };
 
@@ -36,28 +45,28 @@ static NEXT_CLIENT_ID: AtomicU64 = AtomicU64::new(1);
 /// It tracks per-open capabilities and authentication state and is passed to
 /// driver ioctl handlers to provide the calling client's context.
 #[derive(Debug)]
-pub struct DrmFile {
+pub(super) struct DrmFile {
     client_id: u64,
     client_caps: AtomicDrmClientCaps,
     /// Authentication state present only for primary-node files.
     auth: Option<DrmPrimaryAuth>,
     minor: Arc<DrmMinor>,
+
+    gem_handles: Mutex<DrmGemHandleTable>,
+    /// Framebuffers created through this open file.
+    framebuffers: Mutex<Vec<Arc<DrmFramebuffer>>>,
 }
 
 impl DrmFile {
-    pub fn device(&self) -> &Arc<dyn DrmDevice> {
+    pub(super) fn device(&self) -> &Arc<dyn DrmDevice> {
         self.minor.device()
     }
 
-    pub fn minor_type(&self) -> DrmMinorType {
+    pub(super) fn minor_type(&self) -> DrmMinorType {
         self.minor.type_()
     }
 
-    pub fn has_features(&self, feature: DrmFeatures) -> bool {
-        self.device().has_features(feature)
-    }
-
-    pub fn has_client_caps(&self, cap: DrmClientCaps) -> bool {
+    pub(super) fn has_client_caps(&self, cap: DrmClientCaps) -> bool {
         self.client_caps.load(Ordering::Relaxed).contains(cap)
     }
 
@@ -82,6 +91,9 @@ impl DrmFile {
             client_caps: AtomicDrmClientCaps::default(),
             auth,
             minor,
+
+            gem_handles: Mutex::new(DrmGemHandleTable::new()),
+            framebuffers: Mutex::new(Vec::new()),
         }
     }
 
@@ -144,6 +156,66 @@ impl DrmFile {
     pub(super) fn drop_master(&self) -> Result<()> {
         self.check_master_control_permission()?;
         self.minor.drop_master(self.client_id)
+    }
+
+    pub(super) fn add_gem_object(&self, gem_object: Arc<DrmGemObject>) -> Result<u32> {
+        let handle = self.gem_handles.lock().insert(Arc::clone(&gem_object))?;
+        gem_object.allow_mmap(self.client_id);
+        Ok(handle)
+    }
+
+    pub(super) fn lookup_gem_object(&self, handle: u32) -> Result<Arc<DrmGemObject>> {
+        self.gem_handles
+            .lock()
+            .objects
+            .get(&handle)
+            .cloned()
+            .ok_or_else(|| Error::with_message(Errno::ENOENT, "the GEM handle is invalid"))
+    }
+
+    pub(super) fn map_gem_handle(&self, handle: u32) -> Result<u64> {
+        let gem_object = self.lookup_gem_object(handle)?;
+        self.minor.gem_mmap_offset(&gem_object)
+    }
+
+    pub(super) fn remove_gem_object(&self, handle: u32) -> Result<()> {
+        let mut gem_handles = self.gem_handles.lock();
+        let Some(gem_object) = gem_handles.remove(handle) else {
+            return_errno_with_message!(Errno::EINVAL, "the GEM handle is invalid");
+        };
+        drop(gem_handles);
+
+        gem_object.revoke_mmap(self.client_id);
+        Ok(())
+    }
+
+    pub(super) fn add_framebuffer(&self, framebuffer: Arc<DrmFramebuffer>) {
+        let mut framebuffers = self.framebuffers.lock();
+        framebuffers.push(framebuffer);
+    }
+
+    pub(super) fn lookup_framebuffer(&self, id: KmsObjectId) -> Option<Arc<DrmFramebuffer>> {
+        self.framebuffers
+            .lock()
+            .iter()
+            .find(|framebuffer| framebuffer.id() == id)
+            .cloned()
+    }
+
+    pub(super) fn framebuffer_ids(&self) -> Vec<KmsObjectId> {
+        self.framebuffers
+            .lock()
+            .iter()
+            .map(|framebuffer| framebuffer.id())
+            .collect()
+    }
+
+    pub(super) fn remove_framebuffer(&self, id: KmsObjectId) -> Option<Arc<DrmFramebuffer>> {
+        let mut framebuffers = self.framebuffers.lock();
+        let position = framebuffers
+            .iter()
+            .position(|framebuffer| framebuffer.id() == id)?;
+        Some(framebuffers.swap_remove(position))
     }
 
     /// Keeps tracking the ioctl caller while this file has never been master,
@@ -209,9 +281,34 @@ impl PerOpenFileOps for DrmFile {
         true
     }
 
+    fn mappable(&self, request: FileMmapRequest) -> Result<MappableObject<'_>> {
+        if !request.is_shared() {
+            return_errno_with_message!(Errno::EINVAL, "private DRM mappings are not supported");
+        }
+
+        Ok(MappableObject::Device(self as &dyn Mappable))
+    }
+
     fn ioctl(&self, _path: &Path, raw_ioctl: RawIoctl) -> Result<i32> {
         self.update_owner_process();
         self.dispatch_ioctl(raw_ioctl)
+    }
+}
+
+impl Mappable for DrmFile {
+    fn map(&self, offset: usize, handle: MapHandle) -> Result<Box<dyn MappedObject>> {
+        let size = handle.size();
+
+        debug_assert!(offset.is_multiple_of(PAGE_SIZE));
+        debug_assert!(size.is_multiple_of(PAGE_SIZE));
+
+        // A DRM mmap offset is a handle-like token in the device-wide fake
+        // offset address space, rather than a byte position in the DRM file.
+        // `DRM_IOCTL_MODE_MAP_DUMB` returns the start of an object's allocated
+        // range. Userspace passes that value, or a page-aligned position inside
+        // the range, as mmap's file offset.
+        self.minor
+            .create_gem_mapped_object(self.client_id, offset, size)
     }
 }
 
@@ -244,6 +341,18 @@ impl Pollable for DrmFile {
 
 impl Drop for DrmFile {
     fn drop(&mut self) {
+        let device = self.minor.device().clone();
+        if let Some(kms_ops) = device.as_kms_ops() {
+            let mut object_store = kms_ops.mode_config().object_store().lock();
+            for framebuffer in self.framebuffers.get_mut().drain(..) {
+                object_store.free_object_id(framebuffer.id());
+            }
+        }
+
+        for gem_object in self.gem_handles.get_mut().drain() {
+            gem_object.revoke_mmap(self.client_id);
+        }
+
         let Some(auth) = self.auth.as_ref() else {
             return;
         };
@@ -293,21 +402,59 @@ struct DrmPrimaryAuthState {
     master: Arc<DrmMaster>,
 }
 
+#[derive(Debug)]
+struct DrmGemHandleTable {
+    allocator: SparseIdAlloc,
+    objects: HashMap<u32, Arc<DrmGemObject>>,
+}
+
+impl DrmGemHandleTable {
+    fn new() -> Self {
+        Self {
+            // GEM handle 0 is invalid in the DRM uAPI.
+            allocator: SparseIdAlloc::new(1, u32::MAX),
+            objects: HashMap::new(),
+        }
+    }
+
+    fn insert(&mut self, object: Arc<DrmGemObject>) -> Result<u32> {
+        let Some(handle) = self.allocator.alloc() else {
+            return_errno_with_message!(Errno::ENOMEM, "no GEM handles are available");
+        };
+
+        let previous = self.objects.insert(handle, object);
+        debug_assert!(previous.is_none(), "an allocated GEM handle must be unused");
+        Ok(handle)
+    }
+
+    fn remove(&mut self, handle: u32) -> Option<Arc<DrmGemObject>> {
+        let object = self.objects.remove(&handle)?;
+        self.allocator.free(handle);
+        Some(object)
+    }
+
+    fn drain(&mut self) -> impl Iterator<Item = Arc<DrmGemObject>> + '_ {
+        self.allocator = SparseIdAlloc::new(1, u32::MAX);
+        self.objects.drain().map(|(_, object)| object)
+    }
+}
+
 bitflags::bitflags! {
     /// KMS client capabilities enabled for this open DRM file through
     /// `DRM_IOCTL_SET_CLIENT_CAP`.
     ///
     /// These bit positions are internal to Asterinas and do not correspond
     /// to DRM UAPI capability values.
+    #[derive(Clone, Copy, Debug)]
     pub(super) struct DrmClientCaps: u32 {
         /// The client has asked us to expose stereo 3D mode flags.
-        const STEREO_3D = 1 << 0;
+        const STEREO_3D            = 1 << 0;
         /// The client understands CRTC primary and cursor planes in the plane list.
-        const UNIVERSAL_PLANES = 1 << 1;
+        const UNIVERSAL_PLANES     = 1 << 1;
         /// The client understands atomic properties.
-        const ATOMIC = 1 << 2;
+        const ATOMIC               = 1 << 2;
         /// The client can handle picture aspect ratios.
-        const ASPECT_RATIO = 1 << 3;
+        const ASPECT_RATIO         = 1 << 3;
         /// The client understands writeback connectors.
         const WRITEBACK_CONNECTORS = 1 << 4;
         /// The client can handle cursor-plane hotspots for virtualized drivers.

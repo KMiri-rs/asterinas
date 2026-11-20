@@ -12,7 +12,6 @@ use self::pat::{cache_policy_to_flags, flags_to_cache_policy};
 use super::kern_miri_copy;
 use crate::mm::{
     PAGE_SIZE, Paddr, PagingConstsTrait, PagingLevel, PodOnce, Vaddr,
-    dma::DmaDirection,
     page_prop::{PageFlags, PageProperty, PageTableFlags, PrivilegedPageFlags as PrivFlags},
     page_table::{PteScalar, PteTrait},
 };
@@ -30,9 +29,8 @@ impl PagingConstsTrait for PagingConsts {
 }
 
 bitflags::bitflags! {
-    #[derive(Pod)]
-    #[repr(C)]
     /// Possible flags for a page table entry.
+    #[derive(Clone, Copy, Debug)]
     pub(crate) struct PteFlags: usize {
         /// Specifies whether the mapped frame or page table is loaded in memory.
         const PRESENT =         1 << 0;
@@ -104,7 +102,7 @@ pub(crate) fn can_sync_dma() -> bool {
 ///  - the virtual address range and DMA direction correspond correctly to a
 ///    DMA region;
 ///  - `can_sync_dma()` is `true`.
-pub(crate) unsafe fn sync_dma_range<D: DmaDirection>(_range: Range<Vaddr>) {
+pub(crate) unsafe fn sync_dma_range(_range: Range<Vaddr>, _is_from_device: bool) {
     // The streaming DMA mapping in x86_64 is cache coherent, and does not
     // require synchronization.
     // Reference: <https://lwn.net/Articles/855328/>, <https://lwn.net/Articles/2265/>.

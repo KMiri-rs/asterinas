@@ -14,12 +14,13 @@ use crate::{
     events::IoEvents,
     fs::{
         devtmpfs::DevtmpfsNodeMeta,
-        file::{Mappable, PerOpenFileOps, StatusFlags},
+        file::{Mappable, MappableObject, MappedObject, PerOpenFileOps, StatusFlags},
         vfs::{inode::FileOps, path::Path},
     },
     prelude::*,
     process::signal::{PollHandle, Pollable},
     util::ioctl::RawIoctl,
+    vm::vmar::{FileMmapRequest, MapHandle},
 };
 
 #[derive(Debug)]
@@ -242,10 +243,7 @@ impl Device for Fb {
 
     fn open(&self) -> Result<Box<dyn PerOpenFileOps>> {
         let Some(framebuffer) = FRAMEBUFFER.get() else {
-            return Err(Error::with_message(
-                Errno::ENODEV,
-                "the framebuffer device is not present",
-            ));
+            return_errno_with_message!(Errno::ENODEV, "the framebuffer device is not present");
         };
         let framebuffer = framebuffer.clone();
         Ok(Box::new(FbHandle { framebuffer }))
@@ -503,9 +501,8 @@ impl PerOpenFileOps for FbHandle {
         true
     }
 
-    fn mappable(&self) -> Result<Mappable> {
-        let iomem = self.framebuffer.io_mem();
-        Ok(Mappable::IoMem(iomem.clone()))
+    fn mappable(&self, _request: FileMmapRequest) -> Result<MappableObject<'_>> {
+        Ok(MappableObject::Device(self as &dyn Mappable))
     }
 
     fn ioctl(&self, _path: &Path, raw_ioctl: RawIoctl) -> Result<i32> {
@@ -551,6 +548,34 @@ impl PerOpenFileOps for FbHandle {
                 return_errno_with_message!(Errno::ENOTTY, "the ioctl command is unknown");
             }
         })
+    }
+}
+
+impl Mappable for FbHandle {
+    fn map(&self, offset: usize, mut handle: MapHandle) -> Result<Box<dyn MappedObject>> {
+        let io_mem = self.framebuffer.io_mem();
+        let mapped_handle = Box::new(FbMapHandle);
+
+        let io_mem_sliced = if offset >= io_mem.size() {
+            return Ok(mapped_handle);
+        } else if offset != 0 {
+            io_mem.slice(offset..io_mem.size())
+        } else {
+            io_mem.clone()
+        };
+
+        handle.map_iomem(0, io_mem_sliced);
+
+        Ok(mapped_handle)
+    }
+}
+
+#[derive(Debug)]
+struct FbMapHandle;
+
+impl MappedObject for FbMapHandle {
+    fn dup_at_offset(&self, _offset: usize) -> Box<dyn MappedObject> {
+        Box::new(Self)
     }
 }
 

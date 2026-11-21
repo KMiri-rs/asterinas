@@ -309,7 +309,10 @@ where
 
             debug_assert_eq!(next_mut.prev, Some(current));
             next_mut.prev = prev_ptr;
-            self.current = Some(NonNull::from(next_mut));
+            // Keep the list's own pointer: one derived from a `&mut` would be
+            // invalidated under Tree Borrows by later borrows of the node, for
+            // example after a following `insert_before` copies it into a link.
+            self.current = Some(*next);
         } else {
             self.list.back = prev_ptr;
             self.current = None;
@@ -336,7 +339,11 @@ where
         debug_assert!(frame.meta_mut().prev.is_none());
         debug_assert_eq!(frame.slot().in_list.load(Ordering::Relaxed), 0);
 
-        let frame_ptr = NonNull::from(frame.meta_mut());
+        // Take the pointer from the slot, as `cursor_mut_at` does, rather than
+        // from a `&mut` reborrow: the links are written through fresh
+        // `meta_mut()` borrows below, which would invalidate a pointer derived
+        // from an earlier one under Tree Borrows.
+        let frame_ptr = NonNull::new(frame.slot().as_meta_ptr::<Link<M>>()).unwrap();
 
         if let Some(current) = &mut self.current {
             // SAFETY: We own the current node by `&mut self` and the node is

@@ -225,6 +225,13 @@ pub(crate) unsafe fn copy_bsp_for_ap(num_cpus: usize) {
         let addr =
             allocator::early_alloc(Layout::from_size_align(size, PAGE_SIZE).unwrap()).unwrap();
         let ptr = paddr_to_vaddr(addr) as *mut Paddr;
+        // SAFETY: The page was just allocated. KMiri keeps the table, which the
+        // slice below covers, in one object.
+        #[cfg(miri)]
+        unsafe {
+            assert_eq!(size, PAGE_SIZE);
+            crate::arch::kern_miri_retype_pages(addr, 1, crate::arch::PageType::Slab, PAGE_SIZE);
+        }
 
         // SAFETY: The memory is properly allocated. We exclusively own it. So it's valid to write.
         unsafe {
@@ -252,9 +259,16 @@ pub(crate) unsafe fn copy_bsp_for_ap(num_cpus: usize) {
         // 3. The memory is aligned because the alignment of `u8` is 1.
         // 4. The two memory regions do not overlap because allocated memory
         //    regions never overlap with the kernel data.
+        #[cfg(not(miri))]
         unsafe {
             core::ptr::copy_nonoverlapping(bsp_base_va as *const u8, ap_pages_ptr, nbytes);
         }
+        // KMiri keeps each CPU-local variable a separate object, so it copies
+        // them one by one rather than as one block of bytes.
+        #[cfg(miri)]
+        unsafe {
+            crate::arch::kern_miri_copy_cpu_local_section(ap_pages_ptr)
+        };
 
         *res_addr_mut = ap_pages;
     }

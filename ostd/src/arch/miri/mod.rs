@@ -23,8 +23,6 @@ use core::{
     sync::atomic::Ordering,
 };
 
-use crate::task::Task;
-
 pub(crate) unsafe fn late_init_on_bsp() {
     irq::init();
     timer::init();
@@ -38,7 +36,8 @@ pub fn read_random() -> Option<u64> {
 }
 
 pub(crate) unsafe fn init_on_ap() {
-    unimplemented!()
+    // On x86 this starts the AP's local timer. KMiri's timer interrupts are not
+    // per CPU yet, so there is nothing to start.
 }
 
 /// Return the frequency of TSC. The unit is Hz.
@@ -110,14 +109,26 @@ unsafe extern "Rust" {
 
     pub fn kern_miri_get_cpu_local_va(cpu_local_va: usize) -> usize;
 
-    pub fn kern_miri_init_ap(
-        cpu_id: usize,
+    /// Returns the number of CPUs of the machine.
+    pub fn kern_miri_cpu_count() -> usize;
+
+    /// Returns the hardware ID of the current CPU (`0..kern_miri_cpu_count()`).
+    pub fn kern_miri_current_cpu() -> usize;
+
+    /// Starts CPU `cpu`, which runs `func(arg)` on the stack that ends at
+    /// `stack_end`. Everything the caller did before happens before the CPU's
+    /// first step.
+    pub fn kern_miri_start_cpu(
+        cpu: usize,
         func: fn(usize),
         arg: usize,
-        task: &Task,
         stack_end: usize,
         stack_size: usize,
-    ) -> usize;
+    );
+
+    /// Copies the CPU-local section to the virtual address `dst`, as a byte copy
+    /// would, but keeping each variable a separate object.
+    pub fn kern_miri_copy_cpu_local_section(dst: *mut u8);
 
     fn miri_write_to_stdout(bytes: &[u8]);
 

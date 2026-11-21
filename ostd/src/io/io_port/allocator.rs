@@ -91,27 +91,32 @@ pub(in crate::io) unsafe fn init() {
     let max_nr_io_ports = crate::arch::io::MAX_IO_PORT as usize + 1;
     let mut allocator = IdAlloc::with_capacity(max_nr_io_ports);
 
-    unsafe extern "C" {
-        fn __sensitive_io_ports_start();
-        fn __sensitive_io_ports_end();
-    }
-    let start = __sensitive_io_ports_start as *const () as usize;
-    let end = __sensitive_io_ports_end as *const () as usize;
-    assert!((end - start).is_multiple_of(size_of::<RawIoPortRange>()));
+    // KernMiri has no linker sections. Its arch layer drives no device through
+    // port I/O (its console is a shim), so it has no sensitive port to remove.
+    #[cfg(not(miri))]
+    {
+        unsafe extern "C" {
+            fn __sensitive_io_ports_start();
+            fn __sensitive_io_ports_end();
+        }
+        let start = __sensitive_io_ports_start as *const () as usize;
+        let end = __sensitive_io_ports_end as *const () as usize;
+        assert!((end - start).is_multiple_of(size_of::<RawIoPortRange>()));
 
-    // Iterate through the sensitive I/O port ranges and remove them from the allocator.
-    let io_port_range_count = (end - start) / size_of::<RawIoPortRange>();
-    for i in 0..io_port_range_count {
-        let range_base_addr =
-            __sensitive_io_ports_start as *const () as usize + i * size_of::<RawIoPortRange>();
-        // SAFETY: The range is guaranteed to be valid as it is defined in the `.sensitive_io_ports` section.
-        let port_range = unsafe { *(range_base_addr as *const RawIoPortRange) };
+        // Iterate through the sensitive I/O port ranges and remove them from the allocator.
+        let io_port_range_count = (end - start) / size_of::<RawIoPortRange>();
+        for i in 0..io_port_range_count {
+            let range_base_addr =
+                __sensitive_io_ports_start as *const () as usize + i * size_of::<RawIoPortRange>();
+            // SAFETY: The range is guaranteed to be valid as it is defined in the `.sensitive_io_ports` section.
+            let port_range = unsafe { *(range_base_addr as *const RawIoPortRange) };
 
-        assert!(port_range.begin < port_range.end);
-        debug!("Removing sensitive I/O port range: {:#x?}", port_range);
+            assert!(port_range.begin < port_range.end);
+            debug!("Removing sensitive I/O port range: {:#x?}", port_range);
 
-        for i in port_range.begin..port_range.end {
-            allocator.alloc_specific(i as usize);
+            for i in port_range.begin..port_range.end {
+                allocator.alloc_specific(i as usize);
+            }
         }
     }
 

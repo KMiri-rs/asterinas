@@ -26,8 +26,16 @@ use core::{
 use crate::task::Task;
 
 pub(crate) unsafe fn late_init_on_bsp() {
+    // SAFETY: We're on the BSP and this is called only once.
+    let io_mem_builder = unsafe { io::construct_io_mem_allocator_builder() };
+
     irq::init();
     timer::init();
+
+    // SAFETY: This arch drives no device through MMIO or port I/O itself (its
+    // console is a KernMiri shim), so there is no system device I/O to remove.
+    unsafe { crate::io::init(io_mem_builder) };
+
     // SAFETY: We're on the BSP and we're ready to boot all APs.
     unsafe { crate::boot::smp::boot_all_aps() };
 }
@@ -126,6 +134,14 @@ unsafe extern "Rust" {
     pub fn kern_miri_get_cpu_local_base() -> usize;
 
     pub fn kern_miri_set_cpu_local_base(base_vaddr: usize);
+
+    /// Reads `size` (1, 2 or 4) bytes from the x86 I/O port `port` on
+    /// KernMiri's port bus.
+    pub fn kern_miri_port_read(port: u16, size: usize) -> u32;
+
+    /// Writes the low `size` (1, 2 or 4) bytes of `value` to the x86 I/O port
+    /// `port` on KernMiri's port bus.
+    pub fn kern_miri_port_write(port: u16, size: usize, value: u32);
 }
 
 /// The type of the typed page, used to inform miri which

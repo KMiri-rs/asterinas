@@ -142,8 +142,8 @@ pub(crate) struct HwCpuId(u32);
 
 impl HwCpuId {
     pub(crate) fn read_current(guard: &dyn PinCurrentCpu) -> Self {
-        // FIXME: should see x86_64's implementation
-        Self(0)
+        // SAFETY: Reading the ID of the current CPU has no side effect.
+        Self(unsafe { crate::arch::kern_miri_current_cpu() } as u32)
     }
 }
 

@@ -19,7 +19,7 @@ use crate::{
 
 static AP_BOOT_INFO: Once<ApBootInfo> = Once::new();
 
-const AP_BOOT_STACK_SIZE: usize = PAGE_SIZE * 64;
+pub(crate) const AP_BOOT_STACK_SIZE: usize = PAGE_SIZE * 64;
 
 struct ApBootInfo {
     /// Raw boot information for each AP.
@@ -46,8 +46,8 @@ struct PerApInfo {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) struct PerApRawInfo {
-    stack_top: *mut u8,
-    cpu_local: *mut u8,
+    pub(crate) stack_top: *mut u8,
+    pub(crate) cpu_local: *mut u8,
 }
 
 // SAFETY: This information (i.e., the pointer addresses) can be shared safely
@@ -109,26 +109,6 @@ pub(crate) unsafe fn boot_all_aps() {
     unsafe { crate::arch::boot::smp::bringup_all_aps(info_ptr, pt_ptr, num_cpus as _) };
 
     wait_for_all_aps_started(num_cpus);
-
-    // FIXME: not esure if this is needed.
-    // cc https://github.com/KMiri-rs/KMiri/issues/5
-    // #[cfg(miri)]
-    // {
-    //     let ap_boot_info = AP_BOOT_INFO.get().unwrap();
-    //     let boot_stack = &ap_boot_info.boot_stack_array;
-    //
-    //     let ap_init_task = |_| ();
-    //     unsafe {
-    //         crate::arch::kern_miri_init_ap(
-    //             1,
-    //             ap_init_task,
-    //             0,
-    //             &*(0x1000 as *const Task),
-    //             boot_stack.end_paddr() + crate::mm::kspace::KERNEL_BASE_VADDR,
-    //             boot_stack.size(),
-    //         );
-    //     }
-    // }
 
     crate::info!("All application processors started. The BSP continues to run.");
 }

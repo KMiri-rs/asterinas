@@ -131,13 +131,23 @@ fn ostd_main_body(main_fn_name: &Ident) -> proc_macro2::TokenStream {
 }
 
 /// A macro attribute for the kernel entry point of unit test with kmiri.
+///
+/// With `#[miri_main(weak)]` the entry point is only a default: an entry point
+/// defined without `weak` elsewhere in the kernel overrides it. The crate must
+/// enable `feature(linkage)` under `cfg(miri)`.
 #[proc_macro_attribute]
-pub fn miri_main(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn miri_main(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let linkage = match attr.to_string().as_str() {
+        "" => quote!(),
+        "weak" => quote!(#[linkage = "weak"]),
+        other => panic!("unexpected `miri_main` argument `{other}`"),
+    };
     let main_fn = parse_macro_input!(item as ItemFn);
     let main_fn_name = &main_fn.sig.ident;
 
     quote!(
         #[cfg(miri)]
+        #linkage
         #[unsafe(no_mangle)]
         extern "Rust" fn __ostd_main() {
             #main_fn_name();

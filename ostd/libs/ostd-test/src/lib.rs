@@ -184,6 +184,7 @@ impl KtestItem {
     }
 }
 
+#[cfg(not(miri))]
 macro_rules! ktest_array {
     () => {{
         unsafe extern "C" {
@@ -221,6 +222,38 @@ impl KtestIter {
     }
 }
 
+#[cfg(miri)]
+impl Iterator for KtestIter {
+    type Item = KtestItem;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        unsafe extern "Rust" {
+            // Returns the `index`-th static placed in the link section `name`, or null.
+            fn kern_miri_link_section_item(
+                name: *const u8,
+                name_len: usize,
+                index: usize,
+            ) -> *const ();
+        }
+        // KMiri keeps every static in its own allocation instead of laying out
+        // `.ktest_array` as one array, so the items are fetched one at a time.
+        const SECTION: &str = ".ktest_array";
+        // SAFETY: KMiri returns null or a pointer to a static in `.ktest_array`,
+        // all of which are `KtestItem`s.
+        let ptr = unsafe {
+            kern_miri_link_section_item(SECTION.as_ptr(), SECTION.len(), self.index)
+        }
+        .cast::<KtestItem>();
+        if ptr.is_null() {
+            return None;
+        }
+        self.index += 1;
+        // SAFETY: Non-null pointers returned by KMiri point to `KtestItem` statics.
+        Some(unsafe { &*ptr }.clone())
+    }
+}
+
+#[cfg(not(miri))]
 impl Iterator for KtestIter {
     type Item = KtestItem;
 

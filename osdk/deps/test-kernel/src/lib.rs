@@ -8,7 +8,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(
     miri,
-    feature(core_intrinsics, format_args_nl),
+    feature(core_intrinsics, format_args_nl, linkage),
     allow(internal_features, unused)
 )]
 
@@ -35,6 +35,32 @@ pub enum KtestResult {
     Failed,
 }
 
+/// The entry point of the test runner under KMiri. The body is the native one;
+/// only the attribute differs, because KMiri enters the kernel through
+/// `miri_main`. It is weak because OSDK links this crate into every kernel run
+/// under KMiri, and a kernel with its own `miri_main` runs that instead.
+#[cfg(miri)]
+#[ostd::ktest::miri_main(weak)]
+fn main() {
+    use ostd::task::TaskOptions;
+
+    let test_task = move || {
+        use alloc::string::ToString;
+
+        use ostd::power::{ExitCode, poweroff};
+
+        match run_ktests(
+            get_ktest_test_whitelist().map(|s| s.iter().map(|s| s.to_string())),
+            get_ktest_crate_whitelist(),
+        ) {
+            KtestResult::Ok => poweroff(ExitCode::Success),
+            KtestResult::Failed => poweroff(ExitCode::Failure),
+        };
+    };
+
+    TaskOptions::new(test_task).data(()).spawn().unwrap();
+}
+
 /// The entry point of the test runner.
 #[cfg(not(miri))]
 #[ostd::ktest::main]
@@ -58,7 +84,6 @@ fn main() {
     TaskOptions::new(test_task).data(()).spawn().unwrap();
 }
 
-#[cfg(not(miri))]
 #[ostd::ktest::panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     let _irq_guard = ostd::irq::disable_local();
@@ -81,13 +106,6 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     early_println!("An uncaught panic occurred: {:#?}", throw_info);
 
     ostd::prelude::abort();
-}
-
-#[cfg(miri)]
-#[ostd::ktest::panic_handler]
-fn panic_handler(info: &core::panic::PanicInfo) -> ! {
-    ostd::miri_println!("An uncaught panic occurred: {info}");
-    core::intrinsics::abort();
 }
 
 /// Run all the tests registered by `#[ktest]` in the `.ktest_array` section.
@@ -118,6 +136,23 @@ where
     );
     let crate_set =
         crate_whitelist.map(|crates| crates.iter().copied().collect::<BTreeSet<&str>>());
+    #[cfg(miri)]
+    for crate_ in tree.iter() {
+        if let Some(crate_set) = &crate_set
+            && !crate_set.contains(crate_.name())
+        {
+            continue;
+        }
+        for module in crate_.iter() {
+            for test in module.iter() {
+                early_print!(
+                    "KTEST_LIST {}::{}\n",
+                    test.info().module_path,
+                    test.info().fn_name
+                );
+            }
+        }
+    }
     for crate_ in tree.iter() {
         if let Some(crate_set) = &crate_set
             && !crate_set.contains(crate_.name())
@@ -171,6 +206,31 @@ fn run_crate_ktests(crate_: &KtestCrate, whitelist: &Option<SuffixTrie>) -> Ktes
                 }
                 Err(e) => {
                     early_print!(" {}\n", "FAILED".red());
+                    #[cfg(miri)]
+                    {
+                        let (kind, info) = match &e {
+                            KtestError::Panic(s) => ("panic", Some(s)),
+                            KtestError::ShouldPanicButNoPanic => ("did-not-panic", None),
+                            KtestError::ExpectedPanicNotMatch(_, s) => ("wrong-panic", Some(s)),
+                            KtestError::Unknown => ("unknown-payload", None),
+                        };
+                        early_print!(
+                            "KTEST_PANIC {}::{} :: {}",
+                            test.info().module_path,
+                            test.info().fn_name,
+                            kind
+                        );
+                        if let Some(s) = info {
+                            early_print!(
+                                " :: {}:{}:{} :: {}",
+                                s.file,
+                                s.line,
+                                s.col,
+                                s.message.replace('\n', " | ")
+                            );
+                        }
+                        early_print!("\n");
+                    }
                     failed_tests.push((test.clone(), e.clone()));
                 }
             }

@@ -105,7 +105,7 @@ unsafe extern "Rust" {
 
     pub fn kern_miri_log(info: usize);
 
-    pub fn kern_miri_copy(dst: usize, src: usize, len: usize);
+    pub fn kern_miri_copy(dst: *mut u8, src: *const u8, len: usize);
 
     pub fn kern_miri_get_cpu_local_va(cpu_local_va: usize) -> usize;
 

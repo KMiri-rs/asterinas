@@ -168,7 +168,7 @@ unsafe impl Memcpy<Infallible> for Infallible {
         };
         // SAFETY: A magic kmiri intrinsic copy.
         #[cfg(miri)]
-        crate::arch::kern_miri_copy(dst as usize, src as usize, len);
+        crate::arch::kern_miri_copy(dst, src, len);
     }
 }
 

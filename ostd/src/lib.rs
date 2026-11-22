@@ -2,9 +2,6 @@
 
 #![doc = include_str!("../README.md")]
 #![feature(alloc_error_handler)]
-// KMiri: the KMiri toolchain (rustc 1.99-dev, 2026-09-13) predates the stabilization of
-// `core::alloc::AllocError`, which upstream relies on since nightly-2026-11-16.
-#![cfg_attr(miri, feature(allocator_api))]
 #![feature(btree_cursors)]
 #![feature(core_intrinsics)]
 #![feature(format_args_nl)]
@@ -34,14 +31,14 @@ macro_rules! __log_prefix {
 /// `println!` in kmiri. This macro expands nothing if `--cfg=miri` is not enabled.
 #[macro_export]
 macro_rules! miri_println {
-    () => {
+    () => {{
         #[cfg(miri)]
-        $crate::miri_print!("\n")
-    };
-    ($($arg:tt)*) => {
+        $crate::miri_print!("\n");
+    }};
+    ($($arg:tt)*) => {{
         #[cfg(miri)]
-        $crate::arch::_miri_print(::core::format_args_nl!($($arg)*))
-    };
+        $crate::arch::_miri_print(::core::format_args_nl!($($arg)*));
+    }};
 }
 
 /// Record time in kmiri.

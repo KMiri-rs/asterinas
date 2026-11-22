@@ -2,7 +2,7 @@
 
 //! Providing the ability to exit QEMU and return a value as debug result.
 
-use core::intrinsics::abort;
+use core::intrinsics::abort_immediate;
 
 /// The exit code of QEMU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,5 +15,5 @@ pub enum QemuExitCode {
 
 /// Exit QEMU with the given exit code.
 pub fn exit_qemu(exit_code: QemuExitCode) -> ! {
-    abort();
+    abort_immediate();
 }

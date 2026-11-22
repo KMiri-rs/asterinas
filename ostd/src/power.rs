@@ -98,13 +98,13 @@ pub fn inject_poweroff_handler(handler: fn(ExitCode)) {
 #[cfg(miri)]
 pub fn poweroff(code: ExitCode) -> ! {
     crate::miri_println!("power off: {code:?}");
-    core::intrinsics::abort()
+    core::intrinsics::abort_immediate()
 }
 
 #[cfg(miri)]
 fn machine_halt() -> ! {
     crate::miri_println!("machine halt");
-    core::intrinsics::abort()
+    core::intrinsics::abort_immediate()
 }
 
 /// Powers off the system.

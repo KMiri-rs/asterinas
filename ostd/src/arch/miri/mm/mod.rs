@@ -294,7 +294,7 @@ unsafe impl PteTrait for PageTableEntry {
 
 pub(crate) fn __memcpy_fallible(dst: *mut u8, src: *const u8, size: usize) -> usize {
     unsafe {
-        kern_miri_copy(dst as usize, src as usize, size);
+        kern_miri_copy(dst, src, size);
     }
     //unsafe { core::ptr::copy(src, dst, size) };
     0

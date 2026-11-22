@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
 #![no_std]
-// KMiri: the KMiri toolchain (rustc 1.99-dev, 2026-09-13) predates the stabilization of
-// `core::alloc::AllocError`, which upstream relies on since nightly-2026-11-16.
-#![cfg_attr(miri, feature(allocator_api))]
 #![deny(unsafe_code)]
 
 extern crate alloc;

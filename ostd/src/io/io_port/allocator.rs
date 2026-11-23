@@ -91,28 +91,48 @@ pub(in crate::io) unsafe fn init() {
     let max_nr_io_ports = crate::arch::io::MAX_IO_PORT as usize + 1;
     let mut allocator = IdAlloc::with_capacity(max_nr_io_ports);
 
-    unsafe extern "C" {
-        fn __sensitive_io_ports_start();
-        fn __sensitive_io_ports_end();
-    }
-    let start = __sensitive_io_ports_start as *const () as usize;
-    let end = __sensitive_io_ports_end as *const () as usize;
-    assert!((end - start).is_multiple_of(size_of::<RawIoPortRange>()));
-
-    // Iterate through the sensitive I/O port ranges and remove them from the allocator.
-    let io_port_range_count = (end - start) / size_of::<RawIoPortRange>();
-    for i in 0..io_port_range_count {
-        let range_base_addr =
-            __sensitive_io_ports_start as *const () as usize + i * size_of::<RawIoPortRange>();
-        // SAFETY: The range is guaranteed to be valid as it is defined in the `.sensitive_io_ports` section.
-        let port_range = unsafe { *(range_base_addr as *const RawIoPortRange) };
-
+    let mut remove = |port_range: RawIoPortRange| {
         assert!(port_range.begin < port_range.end);
         debug!("Removing sensitive I/O port range: {:#x?}", port_range);
 
         for i in port_range.begin..port_range.end {
             allocator.alloc_specific(i as usize);
         }
+    };
+
+    #[cfg(not(miri))]
+    {
+        unsafe extern "C" {
+            fn __sensitive_io_ports_start();
+            fn __sensitive_io_ports_end();
+        }
+        let start = __sensitive_io_ports_start as *const () as usize;
+        let end = __sensitive_io_ports_end as *const () as usize;
+        assert!((end - start).is_multiple_of(size_of::<RawIoPortRange>()));
+
+        // Iterate through the sensitive I/O port ranges and remove them from the allocator.
+        let io_port_range_count = (end - start) / size_of::<RawIoPortRange>();
+        for i in 0..io_port_range_count {
+            let range_base_addr =
+                __sensitive_io_ports_start as *const () as usize + i * size_of::<RawIoPortRange>();
+            // SAFETY: The range is guaranteed to be valid as it is defined in the `.sensitive_io_ports` section.
+            remove(unsafe { *(range_base_addr as *const RawIoPortRange) });
+        }
+    }
+
+    // Under KMiri each static is its own allocation, so the section is walked
+    // one item at a time.
+    #[cfg(miri)]
+    for i in 0.. {
+        const SECTION: &str = ".sensitive_io_ports";
+        // SAFETY: The name is valid for reads of its length.
+        let item =
+            unsafe { crate::arch::kern_miri_link_section_item(SECTION.as_ptr(), SECTION.len(), i) };
+        if item.is_null() {
+            break;
+        }
+        // SAFETY: Items of this section are `RawIoPortRange` statics.
+        remove(unsafe { *item.cast::<RawIoPortRange>() });
     }
 
     IO_PORT_ALLOCATOR.call_once(|| IoPortAllocator {
@@ -126,6 +146,19 @@ mod test {
 
     type IoPort = crate::io::IoPort<u32, ReadWriteAccess>;
     type ByteIoPort = crate::io::IoPort<u8, ReadWriteAccess>;
+
+    // The `.sensitive_io_ports` walk must find ranges declared inside OSTD.
+    // Under KMiri no arch device reserves ports, so this test declares one.
+    #[cfg(miri)]
+    crate::io::reserve_io_port_range!(0xf0..0xf2);
+
+    #[cfg(miri)]
+    #[ktest]
+    fn reserved_region() {
+        assert!(ByteIoPort::acquire(0xf0).is_err());
+        assert!(ByteIoPort::acquire(0xf1).is_err());
+        assert!(ByteIoPort::acquire(0xf2).is_ok());
+    }
 
     #[ktest]
     fn illegal_region() {

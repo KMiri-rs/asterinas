@@ -2,8 +2,6 @@
 
 //! I/O memory utilities.
 
-use core::arch::asm;
-
 use crate::{arch::mm::__memcpy_fallible, mm::PodOnce};
 
 /// Reads from a pointer with a non-tearing memory load.
@@ -25,36 +23,11 @@ use crate::{arch::mm::__memcpy_fallible, mm::PodOnce};
 /// As such, the kernel must be compiled to emit simple load/store CPU instructions.
 pub(crate) unsafe fn read_once<T: PodOnce>(ptr: *const T) -> T {
     debug_assert!(ptr.is_aligned());
-    let mut val: u64 = 0;
-
+    // Natively a single `mov` of `size_of::<T>()` bytes. Under KMiri a
+    // volatile read is one access of that size, checked like any other.
+    //
     // SAFETY: The caller guarantees `ptr` is valid for reads.
-    unsafe {
-        // EFFICIENCY: The match should be optimized out for release builds.
-        //
-        // This match is resolved at compile-time via monomorphization.
-        // Since `size_of::<T>()` is a constant for each concrete instance of this
-        // function, the compiler eliminates the branch and only emits the
-        // `MOV` instruction for the matching size.
-        // match size_of::<T>() {
-        //     1 => {
-        //         asm!("mov {0:l}, [{1}]", out(reg) val, in(reg) ptr, options(nostack, readonly, preserves_flags))
-        //     }
-        //     2 => {
-        //         asm!("mov {0:x}, [{1}]", out(reg) val, in(reg) ptr, options(nostack, readonly, preserves_flags))
-        //     }
-        //     4 => {
-        //         asm!("mov {0:e}, [{1}]", out(reg) val, in(reg) ptr, options(nostack, readonly, preserves_flags))
-        //     }
-        //     8 => {
-        //         asm!("mov {0}, [{1}]", out(reg) val, in(reg) ptr, options(nostack, readonly, preserves_flags))
-        //     }
-        //     _ => core::hint::unreachable_unchecked(),
-        // }
-        // EFFICIENCY: This should compile to a no-op for release builds.
-        // This is because both the source and destination locations fit in a register.
-        // So it only _re-interprets_ bits and no copying is needed.
-        core::ptr::read((&val as *const u64).cast::<T>())
-    }
+    unsafe { core::ptr::read_volatile(ptr) }
 }
 
 /// Writes to a pointer with a non-tearing memory store.
@@ -68,39 +41,16 @@ pub(crate) unsafe fn read_once<T: PodOnce>(ptr: *const T) -> T {
 /// Refer to the "Guarantee" section of [`read_once`].
 pub(crate) unsafe fn write_once<T: PodOnce>(ptr: *mut T, val: T) {
     debug_assert!(ptr.is_aligned());
-    let mut tmp: u64 = 0;
-
+    // Natively a single `mov` of `size_of::<T>()` bytes (see `read_once`).
+    //
     // SAFETY: The caller guarantees `ptr` is valid for writes.
-    unsafe {
-        // EFFICIENCY: This should be a no-op for release build.
-        // This is because both the source and destination locations fit in a register.
-        // So it only _re-interprets_ bits and no copying is needed.
-        core::ptr::write((&mut tmp as *mut u64).cast::<T>(), val);
-
-        // EFFICIENCY: The match here has no overhead for release build.
-        //
-        // This match is resolved at compile-time via monomorphization.
-        // Since `size_of::<T>()` is a constant for each concrete instance of this
-        // function, the compiler eliminates the branch and only emits the
-        // `MOV` instruction for the matching size.
-        // match size_of::<T>() {
-        //     1 => {
-        //         asm!("mov [{0}], {1:l}", in(reg) ptr, in(reg) tmp, options(nostack, preserves_flags))
-        //     }
-        //     2 => {
-        //         asm!("mov [{0}], {1:x}", in(reg) ptr, in(reg) tmp, options(nostack, preserves_flags))
-        //     }
-        //     4 => {
-        //         asm!("mov [{0}], {1:e}", in(reg) ptr, in(reg) tmp, options(nostack, preserves_flags))
-        //     }
-        //     8 => {
-        //         asm!("mov [{0}], {1}", in(reg) ptr, in(reg) tmp, options(nostack, preserves_flags))
-        //     }
-        //     _ => core::hint::unreachable_unchecked(),
-        // }
-    }
+    unsafe { core::ptr::write_volatile(ptr, val) }
 }
 
+// Natively `rep movsb`: a byte-wise forward copy. KMiri's kernel copy checks
+// each side like the kernel's `memcpy` does (see `Memcpy<Infallible>`). It
+// copies like `memmove`, which differs from `rep movsb` only when the two
+// ranges overlap; one side is MMIO and the other is memory, so they never do.
 macro_rules! do_copy_mmio_impl {
     (dst: $dst:ident, src: $src:ident, count: $count:ident) => {{
         if $count == 0 {
@@ -108,18 +58,11 @@ macro_rules! do_copy_mmio_impl {
         }
 
         // SAFETY: The caller guarantees source and destination are valid for `count` bytes.
-        // unsafe {
-        //     asm!(
-        //         "rep movsb",
-        //         inout("rdi") $dst => _,
-        //         inout("rsi") $src => _,
-        //         inout("rcx") $count => _,
-        //         options(nostack, preserves_flags)
-        //     );
-        // }
+        unsafe { crate::arch::kern_miri_copy($dst, $src, $count) };
     }};
 }
 
+// Natively `rep stosb`: a byte-wise fill, i.e. `volatile_set_memory` on `u8`.
 macro_rules! do_memset_mmio_impl {
     (dst: $dst:ident, value: $value:ident, count: $count:ident) => {{
         if $count == 0 {
@@ -127,15 +70,7 @@ macro_rules! do_memset_mmio_impl {
         }
 
         // SAFETY: The caller guarantees destination pointer is valid for `count` bytes.
-        // unsafe {
-        //     asm!(
-        //         "rep stosb",
-        //         inout("rdi") $dst => _,
-        //         inout("rcx") $count => _,
-        //         in("al") $value,
-        //         options(nostack, preserves_flags)
-        //     );
-        // }
+        unsafe { core::intrinsics::volatile_set_memory($dst, $value, $count) };
     }};
 }
 

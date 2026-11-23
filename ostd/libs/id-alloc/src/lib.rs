@@ -5,13 +5,7 @@
 
 use core::{fmt::Debug, ops::Range};
 
-#[cfg(not(miri))]
 use bitvec::prelude::BitVec;
-#[cfg(miri)]
-use miri_bitvec::BitVec;
-
-#[cfg(miri)]
-mod miri_bitvec;
 
 /// An id allocator implemented by the bitmap.
 /// The true bit implies that the id is allocated, and vice versa.
@@ -200,9 +194,7 @@ mod test {
         assert!(bitmap.alloc_consecutive(1).is_none());
     }
 
-    // Exercises every bit operation `IdAlloc` uses. Under `cfg(miri)` this
-    // runs against `miri_bitvec::BitVec` instead of `bitvec`, so both
-    // implementations must give the same results.
+    // Exercises every bit operation `IdAlloc` uses.
     #[test]
     fn alloc_free_realloc() {
         let mut bitmap = IdAlloc::with_capacity(8);

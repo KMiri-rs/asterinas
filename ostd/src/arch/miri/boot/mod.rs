@@ -41,7 +41,7 @@ fn parse_framebuffer_info() -> Option<BootloaderFramebufferArg> {
 fn parse_memory_regions() -> MemoryRegionArray {
     let mut regions = MemoryRegionArray::new();
 
-    let kernel_region = MemoryRegion::new(0, 4 * 1024 * PAGE_SIZE, MemoryRegionType::Kernel);
+    let kernel_region = MemoryRegion::kernel();
     let region = MemoryRegion::new(
         4 * 1024 * PAGE_SIZE,
         28 * 1024 * PAGE_SIZE,

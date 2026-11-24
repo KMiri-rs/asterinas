@@ -155,6 +155,17 @@ unsafe extern "Rust" {
     /// `port` on KMiri's port bus.
     pub fn kern_miri_port_write(port: u16, size: usize, value: u32);
 
+    /// Reads `size` (1, 2, 4 or 8) bytes of MMIO at `ptr`, zero-extended.
+    ///
+    /// RAM is read like any other memory. KernMiri models no device outside
+    /// RAM, so there the bus floats and the read returns all ones.
+    pub fn kern_miri_mmio_read(ptr: *const u8, size: usize) -> u64;
+
+    /// Writes the low `size` (1, 2, 4 or 8) bytes of `value` to MMIO at `ptr`.
+    ///
+    /// RAM is written like any other memory. Outside RAM the write is dropped.
+    pub fn kern_miri_mmio_write(ptr: *mut u8, size: usize, value: u64);
+
     /// Returns a pointer to the `index`-th static in the linker section
     /// `name`, or null past the last one.
     pub fn kern_miri_link_section_item(

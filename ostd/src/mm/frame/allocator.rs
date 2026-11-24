@@ -107,10 +107,16 @@ impl FrameAllocOptions {
             })
             .ok_or(Error::NoMemory)?;
 
+        // The pages the segment covers. Natively the byte count `nframes * PAGE_SIZE`
+        // is what the allocator and the zeroing below use, so tell KMiri the same
+        // range (the product wraps if overflow checks are off).
+        #[cfg(miri)]
+        let segment_pages = segment.size() / PAGE_SIZE;
+
         // SAFETY: The newly allocated segment is guaranteed to be valid.
         #[cfg(miri)]
         unsafe {
-            crate::arch::kern_miri_alloc_pages(segment.paddr(), nframes);
+            crate::arch::kern_miri_alloc_pages(segment.paddr(), segment_pages);
         }
 
         if self.zeroed {
@@ -120,7 +126,7 @@ impl FrameAllocOptions {
                 #[cfg(not(miri))]
                 core::ptr::write_bytes(addr, 0, nframes * PAGE_SIZE);
                 #[cfg(miri)]
-                crate::arch::kern_miri_zero(segment.paddr(), nframes);
+                crate::arch::kern_miri_zero(segment.paddr(), segment_pages);
             }
         }
 

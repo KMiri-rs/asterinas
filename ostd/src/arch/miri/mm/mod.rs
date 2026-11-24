@@ -305,19 +305,32 @@ pub(crate) fn __memset_fallible(dst: *mut u8, value: u8, size: usize) -> usize {
     0
 }
 
-/// FIXME: need a kmiri intrinsic for this?
-/// See ostd/src/arch/x86/mm/util.rs for semantics; there are two effects:
-/// 1. if the ptr belongs to a valid page, it can successfully load a u32, and zero extension to u64
-/// 2. if the page doesn't allocated yet, trigger a page fault and returns -1 (i.e. !0)
-/// cc https://github.com/KMiri-rs/KMiri/issues/4
-pub(crate) fn __atomic_load_fallible(ptr: *const u32) -> u64 {
-    // SAFETY: the implementation is rough,
-    // because we haven't handle page fault yet.
-    unsafe { *ptr as u64 }
+unsafe extern "Rust" {
+    /// Atomically loads the `u32` at `ptr`, as one step of the machine.
+    fn kern_miri_atomic_load_u32(ptr: *const u32) -> u32;
+
+    /// Atomically compares the `u32` at `ptr` with `old_val` and, if they are equal,
+    /// replaces it with `new_val`, as one step of the machine. Returns the value read.
+    fn kern_miri_atomic_cmpxchg_u32(ptr: *mut u32, old_val: u32, new_val: u32) -> u32;
 }
 
+/// Atomically loads a `u32` from `ptr` and zero-extends it, as
+/// `ostd/src/arch/x86/mm/atomic_load_fallible.S` does.
+///
+/// Natively a page fault makes this return `!0`. KMiri does not model user
+/// memory or page faults yet (cc <https://github.com/KMiri-rs/KMiri/issues/4>),
+/// so an access to unmapped memory is reported by KMiri instead.
+pub(crate) fn __atomic_load_fallible(ptr: *const u32) -> u64 {
+    // SAFETY: The caller guarantees that `ptr` is valid for reads, as for the native version.
+    unsafe { kern_miri_atomic_load_u32(ptr) as u64 }
+}
+
+/// Atomically compares and exchanges the `u32` at `ptr` and returns the old value
+/// zero-extended, as `ostd/src/arch/x86/mm/atomic_cmpxchg_fallible.S` does.
+///
+/// See [`__atomic_load_fallible`] for page faults.
 pub(crate) fn __atomic_cmpxchg_fallible(ptr: *mut u32, old_val: u32, new_val: u32) -> u64 {
-    // SAFETY: the implementation is rough,
-    // because we haven't handle page fault yet.
-    unsafe { *ptr as u64 }
+    // SAFETY: The caller guarantees that `ptr` is valid for reads and writes, as for the
+    // native version.
+    unsafe { kern_miri_atomic_cmpxchg_u32(ptr, old_val, new_val) as u64 }
 }

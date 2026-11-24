@@ -15,7 +15,7 @@ use crate::{
         memory_region::{MemoryRegion, MemoryRegionArray, MemoryRegionType},
     },
     early_println,
-    mm::{PAGE_SIZE, paddr_to_vaddr},
+    mm::paddr_to_vaddr,
 };
 
 fn parse_bootloader_name() -> &'static str {
@@ -41,12 +41,17 @@ fn parse_framebuffer_info() -> Option<BootloaderFramebufferArg> {
 fn parse_memory_regions() -> MemoryRegionArray {
     let mut regions = MemoryRegionArray::new();
 
+    unsafe extern "Rust" {
+        /// The size of the machine's RAM, which starts at physical address 0.
+        fn kern_miri_ram_size() -> usize;
+    }
+
     let kernel_region = MemoryRegion::kernel();
-    let region = MemoryRegion::new(
-        4 * 1024 * PAGE_SIZE,
-        28 * 1024 * PAGE_SIZE,
-        MemoryRegionType::Usable,
-    );
+    // Like a firmware memory map, report all RAM as usable; the kernel region
+    // below is carved out of it.
+    // SAFETY: The KMiri primitive has no preconditions.
+    let ram_size = unsafe { kern_miri_ram_size() };
+    let region = MemoryRegion::new(0, ram_size, MemoryRegionType::Usable);
     regions.push(region);
 
     // Add the kernel region.

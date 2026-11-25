@@ -18,11 +18,83 @@ use crate::{
         trap::{RawUserContext, TrapFrame},
     },
     cpu::PrivilegeLevel,
-    irq::call_irq_callback_functions,
+    cpu_local_cell,
+    irq::{DisabledLocalIrqGuard, call_irq_callback_functions},
     mm::Vaddr,
     ostd_pod::{FromZeros, IntoBytes},
     user::{ReturnReason, UserContextApi, UserContextApiInternal, UserModeHooks},
 };
+
+/// This is the union of the flags that Linux allows `ptrace` and `rt_sigreturn`
+/// to modify.
+pub const USER_MODIFIABLE_RFLAGS: usize = (RFlags::CARRY_FLAG.bits()
+    | RFlags::PARITY_FLAG.bits()
+    | RFlags::AUXILIARY_CARRY_FLAG.bits()
+    | RFlags::ZERO_FLAG.bits()
+    | RFlags::SIGN_FLAG.bits()
+    | RFlags::TRAP_FLAG.bits()
+    | RFlags::DIRECTION_FLAG.bits()
+    | RFlags::OVERFLOW_FLAG.bits()
+    | RFlags::RESUME_FLAG.bits()
+    | RFlags::ALIGNMENT_CHECK.bits()
+    | RFlags::NESTED_TASK.bits()) as usize;
+
+cpu_local_cell! {
+    static USER_FS_BASE: usize = 0;
+    static USER_GS_BASE: usize = 0;
+}
+
+/// The user-mode FS base register.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FsBase(usize);
+
+impl FsBase {
+    /// Creates a new `FsBase` with the given address.
+    pub fn new(addr: usize) -> Self {
+        Self(addr)
+    }
+
+    /// Returns the stored address.
+    pub fn addr(&self) -> usize {
+        self.0
+    }
+
+    /// Saves the current CPU FS base into this struct.
+    pub fn save(&mut self) {
+        self.0 = USER_FS_BASE.load();
+    }
+
+    /// Loads this struct's FS base onto the CPU.
+    pub fn load(&self) {
+        USER_FS_BASE.store(self.0);
+    }
+}
+
+/// The user-mode GS base register.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GsBase(usize);
+
+impl GsBase {
+    /// Creates a new `GsBase` with the given address.
+    pub fn new(addr: usize) -> Self {
+        Self(addr)
+    }
+
+    /// Returns the stored address.
+    pub fn addr(&self) -> usize {
+        self.0
+    }
+
+    /// Saves the current CPU GS base into this struct.
+    pub fn save(&mut self, _guard: &DisabledLocalIrqGuard) {
+        self.0 = USER_GS_BASE.load();
+    }
+
+    /// Loads this struct's GS base onto the CPU.
+    pub fn load(&self, _guard: &DisabledLocalIrqGuard) {
+        USER_GS_BASE.store(self.0);
+    }
+}
 
 /// Userspace CPU context, including general-purpose registers and exception information.
 #[derive(Clone, Default, Debug)]

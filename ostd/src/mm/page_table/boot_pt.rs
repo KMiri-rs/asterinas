@@ -321,6 +321,16 @@ impl<E: PteTrait, C: PagingConstsTrait> BootPageTable<E, C> {
 
     #[cfg(ktest)]
     pub(super) fn new(root_pt: Paddr) -> Self {
+        // The caller hands over a fresh frame to serve as the root page table.
+        // Like the frames from `alloc_child`, it must be typed as a page table
+        // page so that KMiri accepts PTE accesses to it.
+        //
+        // SAFETY: `root_pt` is an allocated frame that is not retyped yet.
+        #[cfg(miri)]
+        unsafe {
+            use crate::arch::{PageType, kern_miri_retype_pages};
+            kern_miri_retype_pages(root_pt, 1, PageType::PageTable, C::PTE_SIZE);
+        }
         Self {
             root_pt,
             _phantom: core::marker::PhantomData,

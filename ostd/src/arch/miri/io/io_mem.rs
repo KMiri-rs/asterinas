@@ -23,14 +23,21 @@ use crate::{arch::mm::__memcpy_fallible, mm::PodOnce};
 /// As such, the kernel must be compiled to emit simple load/store CPU instructions.
 pub(crate) unsafe fn read_once<T: PodOnce>(ptr: *const T) -> T {
     debug_assert!(ptr.is_aligned());
-    // Natively a single `mov` of `size_of::<T>()` bytes, answered by whatever
-    // is at that physical address: RAM, a device, or nothing (all ones). KMiri's
-    // MMIO bus does the same: RAM is one checked access of that size, and an
-    // address with no device floats.
+    // Natively a `match size_of::<T>()` that emits a single 1/2/4/8-byte `mov`
+    // and reaches `unreachable_unchecked` for any other size. The load is
+    // answered by whatever is at that physical address: RAM, a device, or
+    // nothing (all ones). KMiri's MMIO bus does the same: RAM is one checked
+    // access of that size, and an address with no device floats.
     //
-    // SAFETY: The caller guarantees `ptr` is valid for reads.
-    let val = unsafe { crate::arch::kern_miri_mmio_read(ptr.cast(), size_of::<T>()) };
-    // SAFETY: `T: PodOnce` is a plain integer of at most 8 bytes, so any bit
+    // SAFETY: The caller guarantees `ptr` is valid for reads and `size_of::<T>()`
+    // is 1, 2, 4, or 8.
+    let val = unsafe {
+        match size_of::<T>() {
+            size @ (1 | 2 | 4 | 8) => crate::arch::kern_miri_mmio_read(ptr.cast(), size),
+            _ => core::hint::unreachable_unchecked(),
+        }
+    };
+    // SAFETY: `T: PodOnce` is a plain integer of 1, 2, 4, or 8 bytes, so any bit
     // pattern is valid, and x86 is little-endian, so its bytes are the low ones.
     unsafe { core::ptr::read((&raw const val).cast::<T>()) }
 }
@@ -46,12 +53,19 @@ pub(crate) unsafe fn read_once<T: PodOnce>(ptr: *const T) -> T {
 /// Refer to the "Guarantee" section of [`read_once`].
 pub(crate) unsafe fn write_once<T: PodOnce>(ptr: *mut T, val: T) {
     debug_assert!(ptr.is_aligned());
-    // Natively a single `mov` of `size_of::<T>()` bytes (see `read_once`).
+    // Natively copies `val` into a `u64` temporary, then dispatches on
+    // `size_of::<T>()` to a single 1/2/4/8-byte `mov` or `unreachable_unchecked`.
     let mut raw = 0u64;
     // SAFETY: `T: PodOnce` is at most 8 bytes, so it fits in `raw`.
     unsafe { core::ptr::write((&raw mut raw).cast::<T>(), val) };
-    // SAFETY: The caller guarantees `ptr` is valid for writes.
-    unsafe { crate::arch::kern_miri_mmio_write(ptr.cast(), size_of::<T>(), raw) }
+    // SAFETY: The caller guarantees `ptr` is valid for writes and `size_of::<T>()`
+    // is 1, 2, 4, or 8.
+    unsafe {
+        match size_of::<T>() {
+            size @ (1 | 2 | 4 | 8) => crate::arch::kern_miri_mmio_write(ptr.cast(), size, raw),
+            _ => core::hint::unreachable_unchecked(),
+        }
+    }
 }
 
 // Natively `rep movsb`: a byte-wise forward copy. KMiri's kernel copy checks

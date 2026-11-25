@@ -1,0 +1,16 @@
+# KMiri configuration for this crate's ktests (picked up by KMiri's
+# `tool/ktest-sweep.py`). Same as KMiri's default `tests/asterinas.toml`, plus a
+# periodic timer interrupt: softirqs run only on the way out of an interrupt
+# (`process_pending` in this crate's interrupt-end hook), so a test that raises
+# one and waits for it, such as `taskless::test::schedule_taskless`, needs a
+# timer tick just as it does on real hardware.
+page_table = true
+total_mem_size = 0x400_0000
+
+[irq]
+enabled = true
+tick_interval_basic_blocks = 100000
+inject_at_basic_blocks = []
+random_injection_rate = 0.0
+random_seed = 0
+trace = false

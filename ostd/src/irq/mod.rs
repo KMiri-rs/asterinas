@@ -81,13 +81,6 @@ pub use guard::{DisabledLocalIrqGuard, disable_local};
 pub use level::InterruptLevel;
 pub use top_half::{IrqCallbackFunction, IrqLine};
 
-/// Returns the simulated local IRQ state for KMiri integration tests.
-#[cfg(miri)]
-#[doc(hidden)]
-pub fn miri_local_irqs_enabled() -> bool {
-    crate::arch::irq::is_local_enabled()
-}
-
 use crate::{
     arch::{irq::HwIrqLine, trap::TrapFrame},
     cpu::PrivilegeLevel,

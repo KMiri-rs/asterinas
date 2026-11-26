@@ -28,6 +28,7 @@ pub(crate) unsafe fn late_init_on_bsp() {
     let io_mem_builder = unsafe { io::construct_io_mem_allocator_builder() };
 
     irq::init();
+    irq::init_ipi();
     timer::init();
 
     // SAFETY: We're on the BSP and we're ready to boot all APs.

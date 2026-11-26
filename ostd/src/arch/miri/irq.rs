@@ -9,6 +9,8 @@ use spin::once::Once;
 use crate::{
     arch::trap::TrapFrame,
     cpu::{CpuId, PinCurrentCpu},
+    irq::IrqLine,
+    smp,
 };
 
 // Intel(R) 64 and IA-32 rchitectures Software Developer's Manual,
@@ -24,6 +26,7 @@ unsafe extern "Rust" {
     fn kern_miri_irq_enable();
     fn kern_miri_register_irq_entry(entry: extern "Rust" fn(u8));
     fn kern_miri_test_raise_irq(vector: u8);
+    fn kern_miri_send_ipi(cpu: usize, vector: u8);
 }
 
 pub(crate) fn enable_local() {
@@ -126,13 +129,23 @@ impl IrqRemapping {
     }
 }
 
+static IPI_IRQ: Once<IrqLine> = Once::new();
+
+/// Initializes global IPI state.
+pub(super) fn init_ipi() {
+    let mut irq = IrqLine::alloc().unwrap();
+    // SAFETY: This will be called upon an inter-processor interrupt.
+    irq.on_active(|f| unsafe { smp::do_inter_processor_call(f) });
+    IPI_IRQ.call_once(|| irq);
+}
+
 /// Sends a general inter-processor interrupt (IPI) to the specified CPU.
-///
-/// # Safety
-///
-/// The caller must ensure that the CPU ID and the interrupt number corresponds
-/// to a safe function to call.
-pub(crate) fn send_ipi(cpu_id: HwCpuId, guard: &dyn PinCurrentCpu) {}
+pub(crate) fn send_ipi(cpu_id: HwCpuId, _guard: &dyn PinCurrentCpu) {
+    let irq_num = IPI_IRQ.get().unwrap().num();
+    // SAFETY: KMiri validates the target CPU and vector and delivers the IPI
+    // to the registered IRQ entry on that CPU.
+    unsafe { kern_miri_send_ipi(cpu_id.0 as usize, irq_num) };
+}
 
 /// Hardware-specific, architecture-dependent CPU ID.
 ///

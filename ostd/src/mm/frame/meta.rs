@@ -261,6 +261,16 @@ impl MetaSlot {
             slot.ref_count.store(1, Ordering::Release);
         }
 
+        #[cfg(miri)]
+        if META_INIT_DONE.load(Ordering::Acquire) {
+            // SAFETY: After `meta::init` completes, every page claimed from
+            // `REF_COUNT_UNUSED` is a usable RAM page whose KMiri state is
+            // `Unused` (never allocated, or deallocated on last-reference drop).
+            unsafe {
+                crate::arch::kern_miri_alloc_pages(paddr, 1);
+            }
+        }
+
         Ok(slot as *const MetaSlot)
     }
 
@@ -396,6 +406,16 @@ impl MetaSlot {
         // SAFETY: The caller ensures safety.
         unsafe { self.drop_meta_in_place() };
 
+        #[cfg(miri)]
+        if META_INIT_DONE.load(Ordering::Acquire) {
+            // SAFETY: We are the sole owner (`ref_count == 0`) and are about
+            // to release the slot back to `REF_COUNT_UNUSED`, so return the
+            // page to KMiri as `Unused` before another caller can claim it.
+            unsafe {
+                crate::arch::kern_miri_dealloc_pages(self.frame_paddr(), 1);
+            }
+        }
+
         // `Release` pairs with the `Acquire` in `Frame::from_unused` and ensures
         // `drop_meta_in_place` won't be reordered after this memory store.
         self.ref_count.store(REF_COUNT_UNUSED, Ordering::Release);
@@ -513,8 +533,16 @@ pub(crate) unsafe fn init() -> Segment<MetaPageMeta> {
 
     mark_unusable_ranges();
 
-    Segment::from_unused(meta_page_range, |_| MetaPageMeta {}).unwrap()
+    let meta_pages_seg = Segment::from_unused(meta_page_range, |_| MetaPageMeta {}).unwrap();
+
+    #[cfg(miri)]
+    META_INIT_DONE.store(true, Ordering::Release);
+
+    meta_pages_seg
 }
+
+#[cfg(miri)]
+static META_INIT_DONE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// Returns whether the global frame allocator is initialized.
 pub(in crate::mm) fn is_initialized() -> bool {

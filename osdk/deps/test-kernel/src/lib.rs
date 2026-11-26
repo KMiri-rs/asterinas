@@ -5,6 +5,7 @@
 //! run when OSDK is used to test a specific crate.
 
 #![no_std]
+#![feature(panic_can_unwind)]
 #![forbid(unsafe_code)]
 #![cfg_attr(
     miri,
@@ -98,6 +99,11 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
         line: info.location().unwrap().line() as usize,
         col: info.location().unwrap().column() as usize,
     };
+
+    if !info.can_unwind() {
+        early_println!("A non-unwinding panic occurred: {:#?}", throw_info);
+        ostd::prelude::abort();
+    }
 
     // Throw an exception and expecting it to be caught.
     begin_panic(Box::new(throw_info.clone()));

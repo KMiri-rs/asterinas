@@ -218,6 +218,18 @@ impl TaskOptions {
         ctx.set_instruction_pointer(
             crate::arch::task::kernel_task_entry_wrapper as *const () as usize,
         );
+        #[cfg(miri)]
+        {
+            // SAFETY: The thread starts at `kernel_task_entry` on this task's kernel stack.
+            ctx.kmiri_thread = unsafe {
+                scheduler::miri_create_new_thread(
+                    scheduler::kernel_task_entry,
+                    0,
+                    kstack.end_vaddr(),
+                    kernel_stack::KERNEL_STACK_SIZE,
+                )
+            };
+        }
         // We should reserve space for the return address in the stack, otherwise
         // we will write across the page boundary due to the implementation of
         // the context switch.

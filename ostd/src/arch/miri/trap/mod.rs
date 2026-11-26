@@ -182,3 +182,11 @@ pub fn inject_user_page_fault_handler(handler: fn(info: &CpuException) -> Result
 }
 
 pub(crate) unsafe fn init_on_cpu() {}
+
+// The x86 arch derives these from `arch/x86/trap/gdt.rs` (USER_CS = index 6,
+// USER_SS = index 5, RPL 3). `gdt.rs` -- which also holds `LOCAL_TSS` -- is not
+// compiled for the KMiri arch, so only the selector values are repeated here.
+/// User-space code segment selector value.
+pub const USER_CS_VALUE: usize = (6 << 3) | 3;
+/// User-space stack segment selector value.
+pub const USER_SS_VALUE: usize = (5 << 3) | 3;

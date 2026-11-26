@@ -42,19 +42,40 @@ fn parse_memory_regions() -> MemoryRegionArray {
     let mut regions = MemoryRegionArray::new();
 
     unsafe extern "Rust" {
-        /// The size of the machine's RAM, which starts at physical address 0.
-        fn kern_miri_ram_size() -> usize;
+        /// The number of entries in the machine's firmware memory map.
+        fn kern_miri_memory_map_len() -> usize;
+        /// Reads the `index`-th firmware memory map entry (`kind`: 1 = Usable, 2 = Reserved).
+        fn kern_miri_memory_map_entry(
+            index: usize,
+            base: *mut usize,
+            len: *mut usize,
+            kind: *mut u32,
+        ) -> bool;
     }
 
-    let kernel_region = MemoryRegion::kernel();
-    // Like a firmware memory map, report all RAM as usable; the kernel region
-    // below is carved out of it.
-    // SAFETY: The KMiri primitive has no preconditions.
-    let ram_size = unsafe { kern_miri_ram_size() };
-    let region = MemoryRegion::new(0, ram_size, MemoryRegionType::Usable);
-    regions.push(region);
+    // Report the firmware memory map provided by KMiri; any omitted ranges below
+    // the highest region are filled as `MemoryRegionType::Unknown` by
+    // `into_non_overlapping()`, matching native boot behavior.
+    // SAFETY: The KMiri firmware memory map primitives have no preconditions,
+    // and the out pointers are valid for writes.
+    let count = unsafe { kern_miri_memory_map_len() };
+    for i in 0..count {
+        let mut base = 0usize;
+        let mut len = 0usize;
+        let mut kind = 0u32;
+        let ok = unsafe { kern_miri_memory_map_entry(i, &mut base, &mut len, &mut kind) };
+        if ok && len > 0 {
+            let typ = match kind {
+                1 => MemoryRegionType::Usable,
+                2 => MemoryRegionType::Reserved,
+                _ => MemoryRegionType::Unknown,
+            };
+            regions.push(MemoryRegion::new(base, len, typ));
+        }
+    }
 
     // Add the kernel region.
+    let kernel_region = MemoryRegion::kernel();
     regions.push(kernel_region);
 
     regions.into_non_overlapping()

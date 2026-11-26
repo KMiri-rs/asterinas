@@ -67,6 +67,7 @@ use super::{
     inotify::{sys_inotify_add_watch, sys_inotify_init, sys_inotify_init1, sys_inotify_rm_watch},
     ioctl::sys_ioctl,
     kill::sys_kill,
+    kmiri_debug::sys_kmiri_3896,
     link::{sys_link, sys_linkat},
     listen::sys_listen,
     listmount::sys_listmount,
@@ -431,4 +432,5 @@ impl_syscall_nums_and_dispatch_fn! {
     SYS_EPOLL_PWAIT2 = 441     => sys_epoll_pwait2(args[..6]);
     SYS_FCHMODAT2 = 452        => sys_fchmodat2(args[..4]);
     SYS_LISTMOUNT = 458        => sys_listmount(args[..4]);
+    SYS_KMIRI_3896 = 900       => sys_kmiri_3896(args[..2]);
 }

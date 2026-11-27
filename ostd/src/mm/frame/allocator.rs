@@ -59,10 +59,6 @@ impl FrameAllocOptions {
             .ok_or(Error::NoMemory)?;
 
         let paddr = frame.paddr();
-        #[cfg(miri)]
-        unsafe {
-            crate::arch::kern_miri_alloc_pages(paddr, 1);
-        }
         if self.zeroed {
             // SAFETY: The newly allocated frame is guaranteed to be valid.
             #[cfg(not(miri))]
@@ -112,12 +108,6 @@ impl FrameAllocOptions {
         // range (the product wraps if overflow checks are off).
         #[cfg(miri)]
         let segment_pages = segment.size() / PAGE_SIZE;
-
-        // SAFETY: The newly allocated segment is guaranteed to be valid.
-        #[cfg(miri)]
-        unsafe {
-            crate::arch::kern_miri_alloc_pages(segment.paddr(), segment_pages);
-        }
 
         if self.zeroed {
             let addr = paddr_to_vaddr(segment.paddr()) as *mut u8;

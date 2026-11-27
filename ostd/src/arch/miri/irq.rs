@@ -27,6 +27,7 @@ unsafe extern "Rust" {
     fn kern_miri_register_irq_entry(entry: extern "Rust" fn(u8));
     fn kern_miri_test_raise_irq(vector: u8);
     fn kern_miri_send_ipi(cpu: usize, vector: u8);
+    fn kern_miri_halt();
 }
 
 pub(crate) fn enable_local() {
@@ -161,7 +162,7 @@ impl HwCpuId {
 }
 
 pub(crate) fn enable_local_and_halt() {
-    enable_local();
+    unsafe { kern_miri_halt() };
 }
 
 pub(crate) fn disable_local_and_halt() {

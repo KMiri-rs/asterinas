@@ -57,7 +57,8 @@ pub fn tsc_freq() -> u64 {
 
 /// Reads the current value of the processor’s time-stamp counter (TSC).
 pub fn read_tsc() -> u64 {
-    unimplemented!()
+    // SAFETY: Reading KernMiri's clock has no side effects.
+    unsafe { kern_miri_monotonic_nanos() }
 }
 
 pub(crate) fn enable_cpu_features() {
@@ -143,6 +144,9 @@ unsafe extern "Rust" {
     fn miri_write_to_stdout(bytes: &[u8]);
 
     pub fn kern_miri_record_time(index: usize);
+
+    /// Reads KernMiri's clock: nanoseconds since the machine started.
+    pub fn kern_miri_monotonic_nanos() -> u64;
 
     pub fn kern_miri_get_cpu_local_base() -> usize;
 

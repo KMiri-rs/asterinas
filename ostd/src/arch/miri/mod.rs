@@ -70,21 +70,21 @@ unsafe extern "Rust" {
     /// Kernel should not allocate a page at the same address twice.
     /// If an address that has already been allocated is allocated again
     /// before being deallocated, KernMiri will treat it as UB.
-    pub fn kern_miri_alloc_pages(paddr: usize, page_count: usize);
+    pub(crate) fn kern_miri_alloc_pages(paddr: usize, page_count: usize);
 
     /// Informs KernMiri to dealloc `page_count` pages at `paddr`.
     ///
     /// The kernel should only deallocate an address that
     /// has already been allocated by `kern_miri_alloc_pages`;
     /// otherwise, such behavior will be considered UB.
-    pub fn kern_miri_dealloc_pages(paddr: usize, page_count: usize);
+    pub(crate) fn kern_miri_dealloc_pages(paddr: usize, page_count: usize);
 
     /// Informs KernMiri that the `size`-byte heap object at `ptr` has been freed.
-    pub fn kern_miri_dealloc_heap_slot(ptr: *mut u8, size: usize);
+    pub(crate) fn kern_miri_dealloc_heap_slot(ptr: *mut u8, size: usize);
 
     /// Creates the KernMiri allocation for a `size`-byte heap object in the
     /// slot at `ptr` before the slot is returned to a caller.
-    pub fn kern_miri_alloc_heap_slot(ptr: *mut u8, size: usize);
+    pub(crate) fn kern_miri_alloc_heap_slot(ptr: *mut u8, size: usize);
 
     /// Informs KernMiri to retype `page_count` pages at `paddr` to `page_type`.
     /// Each slot in the page has both size and alignment being `slot_size`.
@@ -95,7 +95,7 @@ unsafe extern "Rust" {
     /// The kernel can only retype a page that has been allocated,
     /// and the same page cannot be retyped twice, otherwise,
     /// it will be considered UB.
-    pub fn kern_miri_retype_pages(
+    pub(crate) fn kern_miri_retype_pages(
         paddr: usize,
         page_count: usize,
         page_type: PageType,
@@ -103,32 +103,32 @@ unsafe extern "Rust" {
     );
 
     /// Zero `page_count` of pages out. The first page starts at `paddr`.
-    pub fn kern_miri_zero(paddr: usize, page_count: usize);
+    pub(crate) fn kern_miri_zero(paddr: usize, page_count: usize);
 
     // u8, u16, u32, u64 untyped read/write operation and untyped copy operation. If the operated `ptr` points to a unused or typed memory, this operation will be treated as UB.
 
-    pub fn kern_miri_read_u8_untyped(ptr: *const u8) -> u8;
+    pub(crate) fn kern_miri_read_u8_untyped(ptr: *const u8) -> u8;
 
-    pub fn kern_miri_write_u8_untyped(ptr: *mut u8, value: u8);
+    pub(crate) fn kern_miri_write_u8_untyped(ptr: *mut u8, value: u8);
 
-    pub fn kern_miri_copy_untyped(dst: *const u8, src: *const u8, len: usize);
+    pub(crate) fn kern_miri_copy_untyped(dst: *const u8, src: *const u8, len: usize);
 
-    pub fn kern_miri_log(info: usize);
+    pub(crate) fn kern_miri_log(info: usize);
 
-    pub fn kern_miri_copy(dst: *mut u8, src: *const u8, len: usize);
+    pub(crate) fn kern_miri_copy(dst: *mut u8, src: *const u8, len: usize);
 
-    pub fn kern_miri_get_cpu_local_va(cpu_local_va: usize) -> usize;
+    pub(crate) fn kern_miri_get_cpu_local_va(cpu_local_va: usize) -> usize;
 
     /// Returns the number of CPUs of the machine.
-    pub fn kern_miri_cpu_count() -> usize;
+    pub(crate) fn kern_miri_cpu_count() -> usize;
 
     /// Returns the hardware ID of the current CPU (`0..kern_miri_cpu_count()`).
-    pub fn kern_miri_current_cpu() -> usize;
+    pub(crate) fn kern_miri_current_cpu() -> usize;
 
     /// Starts CPU `cpu`, which runs `func(arg)` on the stack that ends at
     /// `stack_end`. Everything the caller did before happens before the CPU's
     /// first step.
-    pub fn kern_miri_start_cpu(
+    pub(crate) fn kern_miri_start_cpu(
         cpu: usize,
         func: fn(usize),
         arg: usize,
@@ -138,38 +138,38 @@ unsafe extern "Rust" {
 
     /// Copies the CPU-local section to the virtual address `dst`, as a byte copy
     /// would, but keeping each variable a separate object.
-    pub fn kern_miri_copy_cpu_local_section(dst: *mut u8);
+    pub(crate) fn kern_miri_copy_cpu_local_section(dst: *mut u8);
 
     fn miri_write_to_stdout(bytes: &[u8]);
 
     pub fn kern_miri_record_time(index: usize);
 
-    pub fn kern_miri_get_cpu_local_base() -> usize;
+    pub(crate) fn kern_miri_get_cpu_local_base() -> usize;
 
-    pub fn kern_miri_set_cpu_local_base(base_vaddr: usize);
+    pub(crate) fn kern_miri_set_cpu_local_base(base_vaddr: usize);
 
     /// Reads `size` (1, 2 or 4) bytes from the x86 I/O port `port` on
     /// KMiri's port bus.
-    pub fn kern_miri_port_read(port: u16, size: usize) -> u32;
+    pub(crate) fn kern_miri_port_read(port: u16, size: usize) -> u32;
 
     /// Writes the low `size` (1, 2 or 4) bytes of `value` to the x86 I/O port
     /// `port` on KMiri's port bus.
-    pub fn kern_miri_port_write(port: u16, size: usize, value: u32);
+    pub(crate) fn kern_miri_port_write(port: u16, size: usize, value: u32);
 
     /// Reads `size` (1, 2, 4 or 8) bytes of MMIO at `ptr`, zero-extended.
     ///
     /// RAM is read like any other memory. KernMiri models no device outside
     /// RAM, so there the bus floats and the read returns all ones.
-    pub fn kern_miri_mmio_read(ptr: *const u8, size: usize) -> u64;
+    pub(crate) fn kern_miri_mmio_read(ptr: *const u8, size: usize) -> u64;
 
     /// Writes the low `size` (1, 2, 4 or 8) bytes of `value` to MMIO at `ptr`.
     ///
     /// RAM is written like any other memory. Outside RAM the write is dropped.
-    pub fn kern_miri_mmio_write(ptr: *mut u8, size: usize, value: u64);
+    pub(crate) fn kern_miri_mmio_write(ptr: *mut u8, size: usize, value: u64);
 
     /// Returns a pointer to the `index`-th static in the linker section
     /// `name`, or null past the last one.
-    pub fn kern_miri_link_section_item(
+    pub(crate) fn kern_miri_link_section_item(
         name: *const u8,
         name_len: usize,
         index: usize,
@@ -180,14 +180,14 @@ unsafe extern "Rust" {
 /// type of typed page the current page should be retyped into.
 #[repr(usize)]
 #[derive(Clone, Copy)]
-pub enum PageType {
+pub(crate) enum PageType {
     Slab = 1,
     PageTable = 2,
     Stack = 3,
     Interpreter = 4,
 }
 
-pub struct MiriStdout;
+pub(crate) struct MiriStdout;
 
 impl Write for MiriStdout {
     fn write_str(&mut self, s: &str) -> fmt::Result {

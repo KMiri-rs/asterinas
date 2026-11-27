@@ -495,7 +495,7 @@ pub(crate) fn unpark_target(runnable: Arc<Task>) {
 
 ///
 #[cfg(miri)]
-fn kernel_task_entry(_temp: usize) {
+pub(super) fn kernel_task_entry(_temp: usize) {
     // See `switch_to_task` for why we need this.
     crate::arch::irq::enable_local();
     // SAFETY: The new task is switched on a CPU for the first time, `after_switching_to`
@@ -544,25 +544,6 @@ unsafe extern "Rust" {
 /// Note that the new task is not guaranteed to run at once.
 #[track_caller]
 pub(super) fn run_new_task(runnable: Arc<Task>) {
-    // Create the KMiri thread before the scheduler can see the task, and record
-    // it in the task's context, as native code sets up the context in
-    // `TaskOptions::build`.
-    #[cfg(miri)]
-    {
-        // SAFETY: The thread starts at `kernel_task_entry` on this task's kernel stack.
-        let thread = unsafe {
-            miri_create_new_thread(
-                kernel_task_entry,
-                0,
-                runnable.kstack.end_vaddr(),
-                super::kernel_stack::KERNEL_STACK_SIZE,
-            )
-        };
-        // SAFETY: The task has not been handed to the scheduler, so nothing else
-        // accesses its context.
-        unsafe { (*runnable.ctx().get()).kmiri_thread = thread };
-    }
-
     let preempt_cpu = scheduler_singleton().enqueue(runnable.clone(), EnqueueFlags::Spawn);
 
     // FIXME: need to handle multi-cpu switch/preempt.

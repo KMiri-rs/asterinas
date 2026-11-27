@@ -495,7 +495,7 @@ pub(crate) fn unpark_target(runnable: Arc<Task>) {
 
 ///
 #[cfg(miri)]
-pub fn kernel_task_entry(_temp: usize) {
+fn kernel_task_entry(_temp: usize) {
     // See `switch_to_task` for why we need this.
     crate::arch::irq::enable_local();
     // SAFETY: The new task is switched on a CPU for the first time, `after_switching_to`

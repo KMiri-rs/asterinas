@@ -12,10 +12,11 @@ use aster_input::{
     event_type_codes::{KeyCode, KeyStatus, RelCode, SynEvent},
     input_dev::{InputCapability, InputDevice, InputEvent, InputId, RegisteredInputDevice},
 };
-#[cfg(not(miri))]
-use ostd::arch::irq::{IRQ_CHIP, MappedIrqLine};
 use ostd::{
-    arch::trap::TrapFrame,
+    arch::{
+        irq::{IRQ_CHIP, MappedIrqLine},
+        trap::TrapFrame,
+    },
     irq::IrqLine,
     sync::{LocalIrqDisabled, SpinLock},
 };
@@ -27,7 +28,6 @@ use crate::{
 };
 
 /// IRQ line for i8042 mouse.
-#[cfg(not(miri))]
 static IRQ_LINE: Once<MappedIrqLine> = Once::new();
 
 /// Registered device instance for event submission.
@@ -39,12 +39,6 @@ const ISA_INTR_NUM: u8 = 12;
 /// Mouse packet state machine.
 static PACKET_STATE: SpinLock<PacketState, LocalIrqDisabled> = SpinLock::new(PacketState::new());
 
-#[cfg(miri)]
-pub(super) fn init(controller: &mut I8042Controller) -> Result<(), I8042ControllerError> {
-    Ok(())
-}
-
-#[cfg(not(miri))]
 pub(super) fn init(controller: &mut I8042Controller) -> Result<(), I8042ControllerError> {
     let mut init_ctx = InitCtx(controller);
 

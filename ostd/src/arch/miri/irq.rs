@@ -6,12 +6,15 @@ use alloc::{boxed::Box, fmt::Debug};
 
 use spin::once::Once;
 
+pub use self::chip::{IRQ_CHIP, IrqChip, MappedIrqLine};
 use crate::{
     arch::trap::TrapFrame,
     cpu::{CpuId, PinCurrentCpu},
     irq::IrqLine,
     smp,
 };
+
+mod chip;
 
 // Intel(R) 64 and IA-32 rchitectures Software Developer's Manual,
 // Volume 3A, Section 6.2 says "Vector numbers in the range 32 to 255
@@ -53,6 +56,7 @@ pub(crate) fn init() {
     // SAFETY: Called once on the BSP, before any timer vector or test IRQ is set up.
     // The retained Rust entry dispatches the vector through the native trap path.
     unsafe { kern_miri_register_irq_entry(miri_irq_entry) };
+    chip::init();
 }
 
 pub(crate) fn test_raise_irq(vector: u8) {

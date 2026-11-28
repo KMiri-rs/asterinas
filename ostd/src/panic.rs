@@ -10,9 +10,12 @@ extern crate gimli;
 ///
 /// The user can override it by defining their own panic handler with the macro
 /// `#[ostd::panic_handler]`.
-#[linkage = "weak"]
+// `cargo osdk miri` always links the OSDK test runner, whose handler is weak under
+// miri so that a real kernel's handler can override it. Do not export a second weak
+// definition in that build: which one wins would be unspecified, and KMiri rejects it.
+#[cfg_attr(not(all(miri, ktest)), linkage = "weak")]
 // SAFETY: The name does not collide with other symbols.
-#[unsafe(no_mangle)]
+#[cfg_attr(not(all(miri, ktest)), unsafe(no_mangle))]
 pub fn __ostd_panic_handler(info: &core::panic::PanicInfo) -> ! {
     let _irq_guard = crate::irq::disable_local();
 

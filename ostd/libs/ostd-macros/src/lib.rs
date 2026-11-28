@@ -80,10 +80,20 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let body = ostd_main_body(main_fn_name);
 
     quote!(
-        #[cfg(not(ktest))]
+        #[cfg(not(any(ktest, miri)))]
         // SAFETY: The name does not collide with other symbols.
         #[unsafe(no_mangle)]
         extern "Rust" fn __ostd_main() -> ! {
+            #body
+        }
+
+        // `cargo osdk miri` always builds with `--cfg=ktest`, but no ktest runner exists under
+        // miri, so keep the real kernel entry. The miri boot code declares
+        // `fn __ostd_main()`, so the signature must return `()`.
+        #[cfg(miri)]
+        // SAFETY: The name does not collide with other symbols.
+        #[unsafe(no_mangle)]
+        extern "Rust" fn __ostd_main() {
             #body
         }
 
@@ -355,7 +365,10 @@ pub fn panic_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let handler_fn_name = &handler_fn.sig.ident;
 
     quote!(
-        #[cfg(not(ktest))]
+        // `cargo osdk miri` always builds with `--cfg=ktest`, and a crate with
+        // `#[ostd::main]` runs as the real kernel under miri (see `main`), so keep
+        // its panic handler too. The test runner's handler is weak under miri.
+        #[cfg(any(not(ktest), miri))]
         // SAFETY: The name does not collide with other symbols.
         #[unsafe(no_mangle)]
         extern "Rust" fn __ostd_panic_handler(info: &::core::panic::PanicInfo) -> ! {
@@ -381,6 +394,8 @@ pub fn test_panic_handler(_attr: TokenStream, item: TokenStream) -> TokenStream 
     quote!(
         // SAFETY: The name does not collide with other symbols.
         #[unsafe(no_mangle)]
+        // Under miri, a real kernel's `#[ostd::panic_handler]` overrides this one.
+        #[cfg_attr(miri, linkage = "weak")]
         extern "Rust" fn __ostd_panic_handler(info: &::core::panic::PanicInfo) -> ! {
             #handler_fn_name(info);
         }
